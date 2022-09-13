@@ -137,6 +137,7 @@ static const char initial_str[]  = "Unexpected initial";
 %token      L_TOPK_SAMPLE
 %token      L_NTH_PERCENTILE_INST
 %token      L_NTH_PERCENTILE_SAMPLE
+%token      L_HISTOGRAM
 %token      L_ANON
 %token      L_RATE
 %token      L_INSTANT
@@ -604,6 +605,16 @@ func_sid
 		  lp->yy_np = newnode(N_NTH_PERCENTILE_SAMPLE);
 		  lp->yy_np->left = $3;
 		  lp->yy_np->right = $5;
+		  $$ = lp->yy_series.expr = lp->yy_np;
+		}
+	| L_HISTOGRAM L_LPAREN sid_vec L_RPAREN
+		{ lp->yy_np = newnode(N_HISTOGRAM);
+		  lp->yy_np->left = $3;
+		  $$ = lp->yy_series.expr = lp->yy_np;
+		}
+	| L_HISTOGRAM L_LPAREN func_sid L_RPAREN
+		{ lp->yy_np = newnode(N_HISTOGRAM);
+		  lp->yy_np->left = $3;
 		  $$ = lp->yy_series.expr = lp->yy_np;
 		}
 	| L_AVG L_LPAREN sid_vec L_RPAREN
@@ -1097,6 +1108,16 @@ func	: L_RATE L_LPAREN val_vec L_RPAREN
 		  lp->yy_np->right = $5;
 		  $$ = lp->yy_series.expr = lp->yy_np;
 		}
+	| L_HISTOGRAM L_LPAREN val_vec L_RPAREN
+		{ lp->yy_np = newnode(N_HISTOGRAM);
+		  lp->yy_np->left = $3;
+		  $$ = lp->yy_series.expr = lp->yy_np;
+		}
+	| L_HISTOGRAM L_LPAREN func L_RPAREN
+		{ lp->yy_np = newnode(N_HISTOGRAM);
+		  lp->yy_np->left = $3;
+		  $$ = lp->yy_series.expr = lp->yy_np;
+		}
 	| L_AVG L_LPAREN val_vec L_RPAREN
 		{ lp->yy_np = newnode(N_AVG);
 		  lp->yy_np->left = $3;
@@ -1259,6 +1280,7 @@ static const struct {
     { L_TOPK_SAMPLE,	sizeof("topk_sample")-1,	"topk_sample" },
     { L_NTH_PERCENTILE_INST,	sizeof("nth_percentile_inst")-1,	"nth_percentile_inst" },
     { L_NTH_PERCENTILE_SAMPLE,	sizeof("nth_percentile_sample")-1,	"nth_percentile_sample" },
+	{ L_HISTOGRAM,	sizeof("histogram")-1,	"histogram" },
     { L_RATE,		sizeof("rate")-1,	"rate" },
     { L_ABS,		sizeof("abs")-1,	"abs" },
     { L_FLOOR,		sizeof("floor")-1,	"floor" },
@@ -1322,6 +1344,7 @@ static struct {
     { L_TOPK_SAMPLE,	N_TOPK_SAMPLE,	"TOPK_SAMPLE",	NULL },
     { L_NTH_PERCENTILE_INST,	N_NTH_PERCENTILE_INST,	"NTH_PERCENTILE_INST",	NULL },
     { L_NTH_PERCENTILE_SAMPLE, N_NTH_PERCENTILE_SAMPLE, "NTH_PERCENTILE_SAMPLE", NULL },
+	{ L_HISTOGRAM,	N_HISTOGRAM,	"HISTOGRAM",	NULL },
     { L_ANON,		N_ANON,		"ANON",		NULL },
     { L_RATE,		N_RATE,		"RATE",		NULL },
     { L_INSTANT,	N_INSTANT,	"INSTANT",	NULL },
@@ -2156,7 +2179,8 @@ series_dumpexpr(node_t *np, int level)
     case N_MAX_INST: case N_MAX_SAMPLE: case N_MIN_INST: case N_MIN_SAMPLE:
     case N_AVG_INST: case N_AVG_SAMPLE: case N_SUM_INST: case N_SUM_SAMPLE:
     case N_STDEV_INST: case N_STDEV_SAMPLE: case N_NTH_PERCENTILE_INST:
-    case N_NTH_PERCENTILE_SAMPLE: case N_TOPK_INST: case N_TOPK_SAMPLE: 
+    case N_NTH_PERCENTILE_SAMPLE: case N_TOPK_INST: case N_TOPK_SAMPLE:
+	case N_HISTOGRAM: 
 	fprintf(stderr, "%*s%s()", level*4, "", n_type_str(np->type));
 	break;
     case N_SCALE: {

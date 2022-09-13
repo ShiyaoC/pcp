@@ -97,6 +97,7 @@ typedef struct pmSeriesValue {
     sds		timestamp;	/* sample time this value was taken */
     sds		series;		/* series identifier for this value */
     sds		data;		/* actual value, as binary safe sds */
+    int		flag;		/* flag to indicate if is histogram */
     pmTimespec	ts;		/* sample time, converted to binary */
 } pmSeriesValue;
 
@@ -139,6 +140,18 @@ typedef struct pmSeriesCallBacks {
     pmSeriesValueCallBack	on_value;	/* timestamped value */
     pmSeriesDoneCallBack	on_done;	/* request completed */
 } pmSeriesCallBacks;
+
+typedef struct pmSeriesHistogramValue {
+    sds		start;	
+    sds		end;	
+    sds		amount;		
+} pmSeriesHistogramValue;
+
+typedef int (*pmSeriesHistogramValueCallBack)(pmSeriesHistogramValue *, void *);
+
+typedef struct pmSeriesHistogramCallBacks {
+    pmSeriesHistogramValueCallBack  on_values;   /* histogram value info*/
+} pmSeriesHistogramCallBacks;
 
 typedef struct pmSeriesModule {
     pmLogInfoCallBack		on_info;	/* general diagnostics call */

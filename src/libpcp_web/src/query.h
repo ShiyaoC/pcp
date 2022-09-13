@@ -55,6 +55,7 @@ typedef enum nodetype {
     N_TOPK_SAMPLE,
     N_NTH_PERCENTILE_INST,
     N_NTH_PERCENTILE_SAMPLE,
+    N_HISTOGRAM,
     N_ANON,
     N_RATE,
     N_INSTANT,

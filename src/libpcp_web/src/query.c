@@ -2371,6 +2371,7 @@ series_expr_canonical(node_t *np, int idx)
 	left = series_expr_canonical(np->left, idx);
 	right = series_expr_canonical(np->right, idx);
 	break;
+    case N_HISTOGRAM:
     case N_MAX:
     case N_MAX_INST:
     case N_MAX_SAMPLE:
@@ -2467,6 +2468,9 @@ series_expr_canonical(node_t *np, int idx)
 	break;
     case N_NTH_PERCENTILE_SAMPLE:
 	statement = sdscatfmt(sdsempty(), "nth_percentile_inst(%S, %S)", left, right);
+	break;
+    case N_HISTOGRAM:
+	statement = sdscatfmt(sdsempty(), "histogram(%S)", left);
 	break;
     case N_ANON:
 	break;
@@ -2587,11 +2591,33 @@ series_node_values_report(seriesQueryBaton *baton, node_t *np)
 	series = np->value_set.series_values[i].sid->name;
 	for (j = 0; j < np->value_set.series_values[i].num_samples; j++) {
 	    for (k = 0; k < np->value_set.series_values[i].series_sample[j].num_instances; k++) {
+		np->value_set.series_values[i].series_sample[j].series_instance[k].flag = 0;
 		pmSeriesValue value = np->value_set.series_values[i].series_sample[j].series_instance[k];
 		baton->callbacks->on_value(series, &value, baton->userdata);
 	    }
 	}
     }
+}
+
+/*
+ * Report a timeseries result - timestamps and (instance) values from a node
+ */
+static void
+series_node_histogram_values_report(seriesQueryBaton *baton, node_t *np)
+{
+//     sds		series;
+//     int		i, j, k;
+
+//     for (i = 0; i < np->value_set.num_series; i++) {
+// 	series = np->value_set.series_values[i].sid->name;
+// 	for (j = 0; j < np->value_set.series_values[i].num_samples; j++) {
+// 	    for (k = 0; k < np->value_set.series_values[i].series_sample[j].num_instances; k++) {
+// 		np->value_set.series_values[i].series_sample[j].series_instance[k].flag = 0;
+// 		pmSeriesValue value = np->value_set.series_values[i].series_sample[j].series_instance[k];
+// 		baton->callbacks->on_value(series, &value, baton->userdata);
+// 	    }
+// 	}
+//     }
 }
 
 static int
@@ -3646,6 +3672,108 @@ series_calculate_nth_percentile(node_t *np)
     }
 }
 
+static int 
+comp (const void * elem1, const void * elem2)
+{
+    double f = *((double*)elem1);
+    double s = *((double*)elem2);
+    if (f > s) return  1;
+    if (f < s) return -1;
+    return 0;
+}
+// Function to give index of the median
+static int 
+get_median(int l, int r)
+{
+    int n = r - l + 1;
+    n = (n + 1) / 2 - 1;
+    return n + l;
+}
+
+static void
+series_get_time_domain_histogram(node_t *np)
+{
+    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    unsigned int	n_series, n_samples, n_instances, i, j, k;
+    int			mid_index, q3_ind;
+    double		*n_data, data, width, q1, q3, iqr;
+    sds			msg;
+//     pmSeriesValue       inst;
+
+    fprintf(stderr, "in the func\n");
+    n_series = np->left->value_set.num_series;
+//     np->value_set.num_series = n_series;
+//     np->value_set.series_values = (series_sample_set_t *)calloc(n_series, sizeof(series_sample_set_t));
+    for (i = 0; i < n_series; i++) {
+	n_samples = np->left->value_set.series_values[i].num_samples;
+	if (n_samples > 0) {
+	//     np->value_set.series_values[i].num_samples = n_samples;
+	//     np->value_set.series_values[i].series_sample = (series_instance_set_t *)calloc(n_samples, sizeof(series_instance_set_t));
+	    n_instances = np->left->value_set.series_values[i].series_sample[0].num_instances;
+	    for (j = 0; j < n_samples; j++) {
+		// np->value_set.series_values[i].series_sample[j].num_instances = 1;
+		// np->value_set.series_values[i].series_sample[j].series_instance = (pmSeriesValue *)calloc(1, sizeof(pmSeriesValue));
+		n_data = (double*) calloc(n_instances, sizeof(double));
+
+		for (k = 0; k < n_instances; k++) {
+		    if (np->left->value_set.series_values[i].series_sample[j].num_instances != n_instances) {
+			if (pmDebugOptions.query && pmDebugOptions.desperate) {
+			    infofmt(msg, "number of instances in each sample are not equal\n");
+			    batoninfo(baton, PMLOG_ERROR, msg);
+			}
+			continue;
+		    }
+		    data = strtod(np->left->value_set.series_values[i].series_sample[j].series_instance[k].data, NULL);
+		    n_data[k] = data;
+		}
+		qsort (n_data, n_instances, sizeof(double), comp);
+
+		// for (k = 0; k < n_instances; k++) {
+		// 	fprintf(stderr, "k = %d, data = %f\n",k, n_data[k]);
+		// }
+		if (n_instances == 1){
+		    width = 1;
+		}
+		else{
+		    mid_index = get_median(0, n_instances);
+		    q1 = n_data[get_median(0, mid_index)];
+		    q3_ind = mid_index + get_median(mid_index + 1, n_instances);
+		    if (q3_ind > n_instances - 1)
+			q3_ind = n_instances - 1;
+		    q3 = n_data[q3_ind];
+		    iqr = q3 - q1;
+		    width = (2 * iqr) / cbrt(n_instances);
+		    fprintf(stderr, "width = %f\n", width);
+		}
+		
+		// inst = np->left->value_set.series_values[i].series_sample[j].series_instance[instance_idx];
+		// np->value_set.series_values[i].series_sample[j].series_instance[0].timestamp = sdsnew(inst.timestamp);
+		// np->value_set.series_values[i].series_sample[j].series_instance[0].series = sdsnew(inst.series);
+		// np->value_set.series_values[i].series_sample[j].series_instance[0].data = sdsnew(inst.data);
+		// np->value_set.series_values[i].series_sample[j].series_instance[0].ts = inst.ts;
+
+	    }
+	}
+	// } else {
+	//     np->value_set.series_values[i].num_samples = 0;
+	// }
+	// np->value_set.series_values[i].sid = (seriesGetSID *)calloc(1, sizeof(seriesGetSID));
+	// np->value_set.series_values[i].sid->name = sdsnew(np->left->value_set.series_values[i].sid->name);
+	// np->value_set.series_values[i].baton = np->left->value_set.series_values[i].baton;
+	// np->value_set.series_values[i].series_desc.indom = sdsnew(np->left->value_set.series_values[i].series_desc.indom);
+	// np->value_set.series_values[i].series_desc.pmid = sdsnew(np->left->value_set.series_values[i].series_desc.pmid);
+	// np->value_set.series_values[i].series_desc.semantics = sdsnew(np->left->value_set.series_values[i].series_desc.semantics);
+	// np->value_set.series_values[i].series_desc.source = sdsnew(np->left->value_set.series_values[i].series_desc.source);
+	// np->value_set.series_values[i].series_desc.type = sdsnew(np->left->value_set.series_values[i].series_desc.type);
+	// np->value_set.series_values[i].series_desc.units = sdsnew(np->left->value_set.series_values[i].series_desc.units);
+    }
+
+}
+
+static void
+series_get_instance_domain_histogram(node_t *np)
+{
+}
 /*
  * calculate sum or avg in the time series for each sample across time
  */
@@ -4755,7 +4883,7 @@ series_calculate(seriesQueryBaton *baton, node_t *np, int level)
 	    break;
 	case N_AVG_INST:
 	    series_calculate_statistical(np, N_AVG_INST);
-		sts = N_AVG_INST;
+	    sts = N_AVG_INST;
 	    break;
 	case N_AVG_SAMPLE:
 	    series_calculate_time_domain_statistical(np, N_AVG_SAMPLE);
@@ -4787,6 +4915,9 @@ series_calculate(seriesQueryBaton *baton, node_t *np, int level)
 	    break;
 	case N_NTH_PERCENTILE_SAMPLE:
 	    series_calculate_time_domain_nth_percentile(np);
+	    break;
+	case N_HISTOGRAM:
+	    series_get_time_domain_histogram(np);
 	    break;
 	default:
 	    sts = 0;	/* no function */
@@ -4985,17 +5116,22 @@ series_query_funcs_report_values(void *arg)
 
     /* For function-type nodes, calculate actual values */
     has_function = series_calculate(baton, baton->query.root, 0);
-
+    fprintf(stderr, "---------------has_function = %d -----------\n", has_function);
     /*
      * Store the canonical query to Redis if this query statement has
      * function operation.
      */
     if (has_function)
 	series_redis_hash_expression(baton, hashbuf, sizeof(hashbuf));
-
-    /* time series values saved in root node so report them directly. */
-    series_node_values_report(baton, baton->query.root);
     
+    if (has_function == N_HISTOGRAM){
+	series_node_histogram_values_report(baton, baton->query.root);
+	fprintf(stderr, "----------function is histogram-----------\n");
+    }
+    else{
+	/* time series values saved in root node so report them directly. */
+	series_node_values_report(baton, baton->query.root);
+    }
     series_query_end_phase(baton);
 }
 

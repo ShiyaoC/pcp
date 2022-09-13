@@ -375,6 +375,7 @@ on_series_value(pmSID sid, pmSeriesValue *value, void *arg)
     series_inst		*ip;
     sds			series, data;
     int			need_free = 1;
+    printf("----------shiyao testing on value------------\n");
 
     if (series_next(dp, sid))
 	printf("\n%s\n", sid);
@@ -429,6 +430,7 @@ on_series_desc(pmSID series, pmSeriesDesc *desc, void *arg)
     pmInDom		indom_value = PM_IN_NULL;
     pmID		pmid_value = PM_ID_NULL;
     sds			indom, pmid, semantics, source, type, units;
+    printf("----------shiyao testing on desc------------\n");
 
     indom = desc->indom;
     pmid = desc->pmid;
@@ -650,8 +652,11 @@ on_series_label(pmSID series, sds label, void *arg)
     }
     if (!(dp->flags & PMSERIES_ONLY_NAMES))
 	return 0;
-    if (series_next(dp, series))
-	printf("\n%s", series);
+    if (series_next(dp, series)){
+	    printf("\n%s", series);
+        printf("----------shiyao testing------------\n");
+    }
+
     if (dp->flags & PMSERIES_NEED_COMMA)
 	printf(", %s", label);
     else
@@ -971,6 +976,7 @@ series_instlabels_report(series_data *dp, void *arg)
 static void
 series_data_report(series_data *dp, int nseries, pmSID series)
 {
+    fprintf(stderr, "-----------------shiyao check series_data_report------------------\n");
     series_link_report(dp, series_report_header, series);
 
     if (dp->flags & (PMSERIES_OPT_DESC|PMSERIES_NEED_DESCS)) {
