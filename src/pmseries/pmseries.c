@@ -375,7 +375,6 @@ on_series_value(pmSID sid, pmSeriesValue *value, void *arg)
     series_inst		*ip;
     sds			series, data;
     int			need_free = 1;
-    printf("----------shiyao testing on value------------\n");
 
     if (series_next(dp, sid))
 	printf("\n%s\n", sid);
@@ -407,6 +406,53 @@ on_series_value(pmSID sid, pmSeriesValue *value, void *arg)
 
     if (need_free)
 	sdsfree(data);
+    return 0;
+}
+
+static int
+on_histogram_value(pmSID sid, pmSeriesHistogramValue *value, void *arg){
+    series_data		*dp = (series_data *)arg;
+    series_inst		*ip;
+    sds			series, start, end, amount;
+    int			need_free = 1;
+
+    if (series_next(dp, sid))
+	printf("\n%s\n", sid);
+
+    start = value->start;
+    end = value->end;
+    amount = value->amount;
+
+    if (dp->type == NULL)
+	dp->type = sdsempty();
+    if (strncmp(dp->type, "AGGREGATE", sizeof("AGGREGATE")-1) == 0){
+	start = sdscatrepr(sdsempty(), start, sdslen(start));
+	end = sdscatrepr(sdsempty(), end, sdslen(end));
+	amount = sdscatrepr(sdsempty(), amount, sdslen(amount));
+    }
+    else if (strncmp(dp->type, "STRING", sizeof("STRING")-1) == 0){
+	start = sdscatfmt(sdsempty(), "\"%S\"", start);
+	end = sdscatfmt(sdsempty(), "\"%S\"", end);
+	amount = sdscatfmt(sdsempty(), "\"%S\"", amount);
+    }
+    else
+	need_free = 0;
+
+    printf("    [%s, %s] %s\n", start, end, amount);
+
+//     series = value->series;
+//     if (sdscmp(series, sid) == 0)
+// 	printf("%s\n", data);
+//     else if ((ip = series_get_inst(dp, series)) == NULL)
+// 	printf("%s %s\n", data, series);
+//     else
+// 	printf("%s \"%s\"\n", data, ip->name);
+
+    if (need_free){
+	sdsfree(start);
+	sdsfree(end);
+	sdsfree(amount);
+    }
     return 0;
 }
 
@@ -805,6 +851,7 @@ on_series_done(int sts, void *arg)
     series_data		*dp = (series_data *)arg;
     char		msg[PM_MAXERRMSGLEN];
 
+    fprintf(stderr, "on series done\n");
     if (dp->flags & PMSERIES_NEED_RESET) {
 	dp->flags &= ~PMSERIES_NEED_RESET;
 	series_data_reset(dp);
@@ -1438,6 +1485,7 @@ main(int argc, char *argv[])
     dp->settings.callbacks.on_context = on_series_context;
     dp->settings.callbacks.on_metric = on_series_metric;
     dp->settings.callbacks.on_value = on_series_value;
+    dp->settings.callbacks.on_histogram_value = on_histogram_value;
     dp->settings.callbacks.on_label = on_series_label;
     dp->settings.callbacks.on_done = on_series_done;
 

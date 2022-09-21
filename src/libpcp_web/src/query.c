@@ -98,7 +98,7 @@ skip_free_value_set(node_t *np)
     if (np->type == N_RATE || np->type == N_RESCALE || np->type == N_ABS 
 	|| np->type == N_SQRT || np->type == N_FLOOR || np->type == N_ROUND
 	|| np->type == N_LOG || np->type == N_PLUS || np->type == N_MINUS
-	|| np->type == N_STAR || np->type == N_SLASH)
+	|| np->type == N_STAR || np->type == N_SLASH || np->type == N_HISTOGRAM )
 	return 0;
     return 1;
 }
@@ -2591,7 +2591,6 @@ series_node_values_report(seriesQueryBaton *baton, node_t *np)
 	series = np->value_set.series_values[i].sid->name;
 	for (j = 0; j < np->value_set.series_values[i].num_samples; j++) {
 	    for (k = 0; k < np->value_set.series_values[i].series_sample[j].num_instances; k++) {
-		np->value_set.series_values[i].series_sample[j].series_instance[k].flag = 0;
 		pmSeriesValue value = np->value_set.series_values[i].series_sample[j].series_instance[k];
 		baton->callbacks->on_value(series, &value, baton->userdata);
 	    }
@@ -2605,19 +2604,19 @@ series_node_values_report(seriesQueryBaton *baton, node_t *np)
 static void
 series_node_histogram_values_report(seriesQueryBaton *baton, node_t *np)
 {
-//     sds		series;
-//     int		i, j, k;
+    sds		series;
+    int		i, j, k;
 
-//     for (i = 0; i < np->value_set.num_series; i++) {
-// 	series = np->value_set.series_values[i].sid->name;
-// 	for (j = 0; j < np->value_set.series_values[i].num_samples; j++) {
-// 	    for (k = 0; k < np->value_set.series_values[i].series_sample[j].num_instances; k++) {
-// 		np->value_set.series_values[i].series_sample[j].series_instance[k].flag = 0;
-// 		pmSeriesValue value = np->value_set.series_values[i].series_sample[j].series_instance[k];
-// 		baton->callbacks->on_value(series, &value, baton->userdata);
-// 	    }
-// 	}
-//     }
+    for (i = 0; i < np->value_set.num_series; i++) {
+	series = np->value_set.series_values[i].sid->name;
+	for (j = 0; j < np->value_set.series_values[i].num_samples; j++) {
+	    for (k = 0; k < np->value_set.series_values[i].series_sample[j].num_bin; k++) {
+		pmSeriesHistogramValue value = np->value_set.series_values[i].series_sample[j].bin_info[k];
+		baton->callbacks->on_histogram_value(series, &value, baton->userdata);
+	    }
+	}
+    }
+
 }
 
 static int
@@ -3695,26 +3694,25 @@ series_get_time_domain_histogram(node_t *np)
 {
     seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
-    int			mid_index, q3_ind;
-    double		*n_data, data, width, q1, q3, iqr;
+    int			mid_index, q3_ind, bin, bin_size, amount, pointer;
+    double		*n_data, data, width, q1, q3, iqr, start, end;
     sds			msg;
+    char		start_value[64], end_value[64], amount_value[64];
 //     pmSeriesValue       inst;
 
-    fprintf(stderr, "in the func\n");
     n_series = np->left->value_set.num_series;
-//     np->value_set.num_series = n_series;
-//     np->value_set.series_values = (series_sample_set_t *)calloc(n_series, sizeof(series_sample_set_t));
+    np->value_set.num_series = n_series;
+    np->value_set.series_values = (series_sample_set_t *)calloc(n_series, sizeof(series_sample_set_t));
     for (i = 0; i < n_series; i++) {
 	n_samples = np->left->value_set.series_values[i].num_samples;
 	if (n_samples > 0) {
-	//     np->value_set.series_values[i].num_samples = n_samples;
-	//     np->value_set.series_values[i].series_sample = (series_instance_set_t *)calloc(n_samples, sizeof(series_instance_set_t));
+	    np->value_set.series_values[i].num_samples = n_samples;
+	    np->value_set.series_values[i].series_sample = (series_instance_set_t *)calloc(n_samples, sizeof(series_instance_set_t));
 	    n_instances = np->left->value_set.series_values[i].series_sample[0].num_instances;
 	    for (j = 0; j < n_samples; j++) {
 		// np->value_set.series_values[i].series_sample[j].num_instances = 1;
 		// np->value_set.series_values[i].series_sample[j].series_instance = (pmSeriesValue *)calloc(1, sizeof(pmSeriesValue));
 		n_data = (double*) calloc(n_instances, sizeof(double));
-
 		for (k = 0; k < n_instances; k++) {
 		    if (np->left->value_set.series_values[i].series_sample[j].num_instances != n_instances) {
 			if (pmDebugOptions.query && pmDebugOptions.desperate) {
@@ -3743,31 +3741,52 @@ series_get_time_domain_histogram(node_t *np)
 		    q3 = n_data[q3_ind];
 		    iqr = q3 - q1;
 		    width = (2 * iqr) / cbrt(n_instances);
-		    fprintf(stderr, "width = %f\n", width);
+		//     fprintf(stderr, "width = %f\n", width);
 		}
-		
-		// inst = np->left->value_set.series_values[i].series_sample[j].series_instance[instance_idx];
-		// np->value_set.series_values[i].series_sample[j].series_instance[0].timestamp = sdsnew(inst.timestamp);
-		// np->value_set.series_values[i].series_sample[j].series_instance[0].series = sdsnew(inst.series);
-		// np->value_set.series_values[i].series_sample[j].series_instance[0].data = sdsnew(inst.data);
-		// np->value_set.series_values[i].series_sample[j].series_instance[0].ts = inst.ts;
+		bin_size = ceil((n_data[n_instances-1] - n_data[0]) / width);
+		// fprintf(stderr, "bin_size = %d\n", bin_size);
 
+		np->value_set.series_values[i].series_sample[j].num_bin = bin_size;
+		np->value_set.series_values[i].series_sample[j].bin_info = (pmSeriesHistogramValue *)calloc(bin_size, sizeof(pmSeriesHistogramValue));
+
+		// np->histogram_value_set.bin_info = (histogram_bin_info_t *)calloc(bin_size, sizeof(histogram_bin_info_t));
+		start = n_data[0];
+		end = start + width;
+		pointer = 0;
+
+		for (bin = 0; bin < bin_size; bin++){
+		    amount = 0;
+		    while (pointer < n_instances) {
+			if (n_data[pointer] < end) {
+			    amount += 1;
+			    pointer += 1;
+			}
+			else {
+			    pointer += 1;
+			    break;
+			}
+		    }
+		    pmsprintf(start_value, sizeof(start_value), "%le", start);
+		    pmsprintf(end_value, sizeof(end_value), "%le", end);
+		    pmsprintf(amount_value, sizeof(amount_value), "%d", amount);
+		    np->value_set.series_values[i].series_sample[j].bin_info[bin].start = sdsnew(start_value);
+		    np->value_set.series_values[i].series_sample[j].bin_info[bin].end = sdsnew(end_value);
+		    np->value_set.series_values[i].series_sample[j].bin_info[bin].amount = sdsnew(amount_value);
+		}
 	    }
+	} else {
+	    np->value_set.series_values[i].num_samples = 0;
 	}
-	// } else {
-	//     np->value_set.series_values[i].num_samples = 0;
-	// }
-	// np->value_set.series_values[i].sid = (seriesGetSID *)calloc(1, sizeof(seriesGetSID));
-	// np->value_set.series_values[i].sid->name = sdsnew(np->left->value_set.series_values[i].sid->name);
-	// np->value_set.series_values[i].baton = np->left->value_set.series_values[i].baton;
-	// np->value_set.series_values[i].series_desc.indom = sdsnew(np->left->value_set.series_values[i].series_desc.indom);
-	// np->value_set.series_values[i].series_desc.pmid = sdsnew(np->left->value_set.series_values[i].series_desc.pmid);
-	// np->value_set.series_values[i].series_desc.semantics = sdsnew(np->left->value_set.series_values[i].series_desc.semantics);
-	// np->value_set.series_values[i].series_desc.source = sdsnew(np->left->value_set.series_values[i].series_desc.source);
-	// np->value_set.series_values[i].series_desc.type = sdsnew(np->left->value_set.series_values[i].series_desc.type);
-	// np->value_set.series_values[i].series_desc.units = sdsnew(np->left->value_set.series_values[i].series_desc.units);
+	np->value_set.series_values[i].sid = (seriesGetSID *)calloc(1, sizeof(seriesGetSID));
+	np->value_set.series_values[i].sid->name = sdsnew(np->left->value_set.series_values[i].sid->name);
+	np->value_set.series_values[i].baton = np->left->value_set.series_values[i].baton;
+	np->value_set.series_values[i].series_desc.indom = sdsnew(np->left->value_set.series_values[i].series_desc.indom);
+	np->value_set.series_values[i].series_desc.pmid = sdsnew(np->left->value_set.series_values[i].series_desc.pmid);
+	np->value_set.series_values[i].series_desc.semantics = sdsnew(np->left->value_set.series_values[i].series_desc.semantics);
+	np->value_set.series_values[i].series_desc.source = sdsnew(np->left->value_set.series_values[i].series_desc.source);
+	np->value_set.series_values[i].series_desc.type = sdsnew(np->left->value_set.series_values[i].series_desc.type);
+	np->value_set.series_values[i].series_desc.units = sdsnew(np->left->value_set.series_values[i].series_desc.units);
     }
-
 }
 
 static void
@@ -5116,7 +5135,6 @@ series_query_funcs_report_values(void *arg)
 
     /* For function-type nodes, calculate actual values */
     has_function = series_calculate(baton, baton->query.root, 0);
-    fprintf(stderr, "---------------has_function = %d -----------\n", has_function);
     /*
      * Store the canonical query to Redis if this query statement has
      * function operation.
@@ -5126,7 +5144,6 @@ series_query_funcs_report_values(void *arg)
     
     if (has_function == N_HISTOGRAM){
 	series_node_histogram_values_report(baton, baton->query.root);
-	fprintf(stderr, "----------function is histogram-----------\n");
     }
     else{
 	/* time series values saved in root node so report them directly. */

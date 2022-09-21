@@ -126,6 +126,10 @@ typedef struct series_instance_set {
     /* Number of series instances */
     int			num_instances;
     pmSeriesValue	*series_instance;
+
+    int			num_bin;
+    pmSeriesHistogramValue	*bin_info;
+
 } series_instance_set_t;
 
 typedef struct series_sample_set {
@@ -145,6 +149,11 @@ typedef struct series_value_set {
     series_sample_set_t		*series_values;
 } series_value_set_t;
 
+// typedef struct histogram_value_set_t {
+//     /* Number of series identifiers*/
+//     int				num_bin;
+//     histogram_bin_info_t	*bin_info;
+// } histogram_value_set_t;
 
 typedef struct timing {
     /* input string */
@@ -183,6 +192,8 @@ typedef struct node {
 
     /* result set of time series values at this node */
     series_value_set_t	value_set;
+
+//     histogram_value_set_t histogram_value_set;
 
     /* Corresponding time specifier */
     timing_t		time;
