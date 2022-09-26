@@ -2,7 +2,11 @@
 # PCP QA Test No. 1681
 # Exercise pmrepconf generating pmrep.conf(5) format.
 #
+# Note: pmrepconf is a symink to pmlogconf
+#
 # Copyright (c) 2020 Red Hat.  All Rights Reserved.
+#
+# check-group-include: pmlogconf
 #
 
 if [ $# -eq 0 ]
@@ -93,7 +97,7 @@ else
 fi | _filter
 cat $tmp.option >> $here/$seq.full
 echo Check options saved | tee -a $here/$seq.full
-egrep '^globals|^timestamp' $tmp.option
+grep -E '^globals|^timestamp' $tmp.option
 echo done
 
 # success, all done

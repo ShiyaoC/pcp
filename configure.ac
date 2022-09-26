@@ -141,12 +141,6 @@ AC_ARG_WITH([pmdastatsd],
     [do_pmdastatsd=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-pmdastatsd=$withval"],
     [do_pmdastatsd=check])
 
-AC_ARG_WITH([pmdapodman],
-    [AC_HELP_STRING([--with-pmdapodman],
-		   [enable podman pmda (default is on)])],
-    [do_pmdapodman=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-pmdapodman=$withval"],
-    [do_pmdapodman=check])
-
 AC_ARG_WITH([pmdabcc],
     [AC_HELP_STRING([--with-pmdabcc],
 		   [enable BCC pmda (default is on)])],
@@ -173,7 +167,7 @@ AC_ARG_WITH([pmdabpf-llvm-strip],
 
 AC_ARG_WITH([pmdabpf-bpftool],
     [AC_HELP_STRING([--with-pmdabpf-bpftool],
-                    [path to bpftool (default is empty for auto discovery)])],
+                    [path to bpftool (default is empty to build)])],
     [PMDABPF_BPFTOOL=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-pmdabpf-bpftool=$withval"],
     [PMDABPF_BPFTOOL=''])
 
@@ -845,6 +839,10 @@ AS_IF([test "x$do_systemd" != "xno"], [
 	[pcp_systemdtmpfiles_dir=$SYSTEMD_TMPFILESDIR],
 	[pcp_systemdtmpfiles_dir=$pcp_lib32_dir/tmpfiles.d])
     AC_SUBST(pcp_systemdtmpfiles_dir)
+    PKG_CHECK_VAR([SYSTEMD_SYSUSERSDIR], [systemd], [sysusersdir],
+	[pcp_systemdsysusers_dir=$SYSTEMD_SYSUSERSDIR],
+	[pcp_systemdsysusers_dir=$pcp_lib32_dir/sysusers.d])
+    AC_SUBST(pcp_systemdsysusers_dir)
     PKG_CHECK_VAR([SYSTEMD_SYSTEMUNITDIR], [systemd], [systemdsystemunitdir],
 	[pcp_systemdunit_dir=$SYSTEMD_SYSTEMUNITDIR], [enable_systemd=false])
     AC_SUBST(pcp_systemdunit_dir)
@@ -1218,9 +1216,18 @@ fi
 pmdabpf_llvm_strip=$PMDABPF_LLVM_STRIP
 AC_SUBST(pmdabpf_llvm_strip)
 
-dnl Auto-discover bpftool if not provided by the user
+dnl Build bpftool if not provided by the user
+build_bpftool=false
 if test -z "$PMDABPF_BPFTOOL"; then
-    AC_PATH_PROG(PMDABPF_BPFTOOL, bpftool)
+    if $have_libelf; then
+        PMDABPF_BPFTOOL=`realpath vendor/github.com/libbpf/bpftool/src/bpftool`
+        AC_MSG_NOTICE([using bpftool at $PMDABPF_BPFTOOL])
+        build_bpftool=true
+    else
+        AC_MSG_NOTICE([not building bpftool because libelf was not found, please use --with-pmdabpf-bpftool to specify bpftool])
+    fi
+else
+    AC_MSG_NOTICE([using bpftool at $PMDABPF_BPFTOOL])
 fi
 pmdabpf_bpftool=$PMDABPF_BPFTOOL
 AC_SUBST(pmdabpf_bpftool)
@@ -1257,7 +1264,7 @@ AS_IF([test "x$do_pmdabpf" = "xcheck"], [
     dnl pmdabpf requires libbpf, libelf and bpftool
     $have_libbpf && $have_libelf && \
 	test $clang_major_version -ge 10 && \
-	test -x "$pmdabpf_bpftool" && \
+	(test -x "$pmdabpf_bpftool" || $build_bpftool) && \
 	test -f "$pmdabpf_vmlinuxh" && \
 	pmda_bpf=true
 ])
@@ -1321,9 +1328,9 @@ AS_IF([test "x$do_perl" != "xno"], [
     AC_MSG_RESULT($pcp_perl_prog)
 
     dnl extra check for the Perl MakeMaker package for building modules
-    AC_MSG_CHECKING([if ExtUtils::MakeMaker is installed])
     if test "$have_perl" = true
     then
+        AC_MSG_CHECKING([if ExtUtils::MakeMaker is installed])
         $pcp_perl_prog -e "use ExtUtils::MakeMaker" 2>/dev/null
         if test $? -eq 0
         then
@@ -2148,12 +2155,6 @@ AS_IF([test "x$do_pmdastatsd" = "xcheck"], [
 AC_SUBST(PMDA_STATSD, $pmda_statsd)
 if $pmda_statsd; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
 
-AC_MSG_CHECKING([if the podman PMDA should be included])
-pmda_podman=true
-AS_IF([test "x$do_pmdapodman" = "xno"], [pmda_podman=false])
-AC_SUBST(PMDA_PODMAN, $pmda_podman)
-if $pmda_podman; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
-
 dnl Do you have the required qshape script for the postfix PMDA
 dnl The logic here is copied from the PMDA's Install script
 pmda_postfix=false
@@ -2346,7 +2347,7 @@ AS_IF([test "x$enable_selinux" != "xfalse"], [
     && pcp_selinux_hostname_exec_map=true
 
     seinfo -x --class=bpf $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)bpf$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)bpf$' >/dev/null \
     && pcp_selinux_bpf=true
 
     seinfo -a 2>/dev/null \
@@ -2362,47 +2363,47 @@ AS_IF([test "x$enable_selinux" != "xfalse"], [
     && pcp_selinux_capability2_bpf=true
 
     seinfo -x --class=icmp_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)icmp_socket$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)icmp_socket$' >/dev/null \
     && pcp_selinux_icmp_socket_class=true
 
     seinfo -x --class=lockdown $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)lockdown$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)lockdown$' >/dev/null \
     && pcp_selinux_lockdown_class=true
 
     dnl these ones are for pcpqa.te
 
     seinfo -x --class=netlink_selinux_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)netlink_selinux_socket$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)netlink_selinux_socket$' >/dev/null \
     && pcp_selinux_netlink_selinux_socket_class=true
 
     seinfo -x --class=netlink_audit_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)netlink_audit_socket$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)netlink_audit_socket$' >/dev/null \
     && pcp_selinux_netlink_audit_socket_class=true
 
     seinfo -x --class=sock_file $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)sock_file$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)sock_file$' >/dev/null \
     && pcp_selinux_sock_file_class=true
 
     seinfo -x --class=security $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)security$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)security$' >/dev/null \
     && pcp_selinux_security_class=true
 
     dnl pcp_selinux_dir already used for something else, so name to
     dnl set is pcp_selinux_dir_class
     seinfo -x --class=dir $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)dir$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)dir$' >/dev/null \
     && pcp_selinux_dir_class=true
 
     seinfo -x --class=rawip_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)rawip_socket$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)rawip_socket$' >/dev/null \
     && pcp_selinux_rawip_socket_class=true
 
     seinfo -x --class=netlink_generic_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)netlink_generic_socket$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)netlink_generic_socket$' >/dev/null \
     && pcp_selinux_netlink_generic_socket_class=true
 
     seinfo -x --class=netlink_tcpdiag_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[[ 	]][[ 	]]*(class |)netlink_tcpdiag_socket$' >/dev/null \
+    | grep -E '^[[ 	]][[ 	]]*(class |)netlink_tcpdiag_socket$' >/dev/null \
     && pcp_selinux_netlink_tcpdiag_socket_class=true
 
 ])
@@ -2506,13 +2507,13 @@ dnl Checks for library functions.
 AC_TYPE_SIGNAL
 AC_FUNC_WAIT3
 AC_FUNC_VPRINTF
-AC_CHECK_FUNCS(mktime nanosleep usleep unsetenv)
+AC_CHECK_FUNCS(mktime nanosleep usleep unsetenv getrusage)
 AC_CHECK_FUNCS(select socket syslog sendmsg recvmsg setns)
 AC_CHECK_FUNCS(getuid getgid getpeerucred getpeereid)
 AC_CHECK_FUNCS(uname gethostname getdomainname getmachineid)
 AC_CHECK_FUNCS(__clone pipe2 fcntl ioctl)
 AC_CHECK_FUNCS(prctl setlinebuf waitpid atexit kill)
-AC_CHECK_FUNCS(chown fchmod getcwd scandir mkstemp)
+AC_CHECK_FUNCS(chown fchmod fchown getcwd scandir mkstemp)
 AC_CHECK_FUNCS(brk sbrk posix_memalign memalign valloc)
 AC_CHECK_FUNCS(signal sighold sigrelse tcgetattr)
 AC_CHECK_FUNCS(regex regcmp regexec regcomp)

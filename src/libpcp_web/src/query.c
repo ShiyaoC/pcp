@@ -71,7 +71,7 @@ typedef struct seriesQueryBaton {
 static void series_pattern_match(seriesQueryBaton *, node_t *);
 static int series_union(series_set_t *, series_set_t *);
 static int series_intersect(series_set_t *, series_set_t *);
-static int series_calculate(seriesQueryBaton *, node_t *, int);
+static int series_calculate(node_t *, int, void *);
 static void series_redis_hash_expression(seriesQueryBaton *, char *, int);
 static void series_node_get_metric_name(seriesQueryBaton *, seriesGetSID *, series_sample_set_t *);
 static void series_node_get_desc(seriesQueryBaton *, sds, series_sample_set_t *);
@@ -1369,14 +1369,14 @@ static void
 on_series_solve_setup(void *arg)
 {
     if (pmDebugOptions.query)
-	fprintf(stderr, "on_series_solve_setup\n");
+	fprintf(stderr, "%s\n", "on_series_solve_setup");
 }
 
 static void
 on_series_solve_log(pmLogLevel level, sds message, void *arg)
 {
     if (pmDebugOptions.query)
-	fprintf(stderr, "on_series_solve_log: %s\n", message);
+	fprintf(stderr, "%s: %s\n", "on_series_solve_log", message);
 }
 
 static void
@@ -1386,7 +1386,7 @@ on_series_solve_done(int status, void *arg)
 
     seriesBatonCheckMagic(baton, MAGIC_QUERY, "on_series_solve_done");
     if (pmDebugOptions.query && pmDebugOptions.desperate)
-	fprintf(stderr, "on_series_solve_done: arg=%p status=%d\n", arg, status);
+	fprintf(stderr, "%s: arg=%p status=%d\n", "on_series_solve_done", arg, status);
     baton->callbacks->on_done(status, baton->userdata);
 }
 
@@ -1397,7 +1397,7 @@ on_series_solve_value(pmSID sid, pmSeriesValue *value, void *arg)
 
     seriesBatonCheckMagic(baton, MAGIC_QUERY, "on_series_solve_value");
     if (pmDebugOptions.query && pmDebugOptions.desperate)
-	fprintf(stderr, "on_series_solve_value: arg=%p %s %s %s\n",
+	fprintf(stderr, "%s: arg=%p %s %s %s\n", "on_series_solve_value",
 		arg, value->timestamp, value->data, value->series);
     return baton->callbacks->on_value(sid, value, baton->userdata);
 }
@@ -1408,9 +1408,9 @@ on_series_solve_inst_done(int status, void *arg)
 {
     seriesQueryBaton	*baton = arg;
 
-    seriesBatonCheckMagic(baton, MAGIC_QUERY, "on_series_solve_done");
+    seriesBatonCheckMagic(baton, MAGIC_QUERY, "on_series_solve_inst_done");
     if (pmDebugOptions.query && pmDebugOptions.desperate)
-	fprintf(stderr, "on_series_solve_done: arg=%p status=%d\n", arg, status);
+	fprintf(stderr, "%s: arg=%p status=%d\n", "on_series_solve_done", arg, status);
     /* on_done is called by series_query_finished */
     seriesBatonDereference(baton, "on_series_solve_inst_done");
 }
@@ -1428,7 +1428,7 @@ on_series_solve_inst_value(pmSID sid, pmSeriesValue *value, void *arg)
 
     seriesBatonCheckMagic(baton, MAGIC_QUERY, "on_series_solve_inst_value");
     if (pmDebugOptions.query) {
-	fprintf(stderr, "on_series_solve_inst_value: arg=%p %s %s %s\n",
+	fprintf(stderr, "%s: arg=%p %s %s %s\n", "on_series_solve_inst_value",
 		arg, value->timestamp, value->data, value->series);
     }
 
@@ -1487,23 +1487,24 @@ series_solve_sid_expr(pmSeriesSettings *settings, pmSeriesExpr *expr, void *arg)
     seriesBatonCheckMagic(sid, MAGIC_SID, "series_query_expr_reply");
     seriesBatonCheckMagic(baton, MAGIC_QUERY, "series_query_expr_reply");
 
-    if (pmDebugOptions.query) {
-	fprintf(stderr, "series_solve_sid_expr: SID %s, "
-		"seriesQueryBaton=%p, pmSeriesBaton=userdata=%p expr=\"%s\"\n",
-		sid->name, baton, baton->userdata, expr->query);
-    }
+    if (pmDebugOptions.query)
+	fprintf(stderr, "%s: SID %s, seriesQueryBaton=%p, "
+			"pmSeriesBaton=userdata=%p expr=\"%s\"\n",
+			"series_solve_sid_expr",
+			sid->name, baton, baton->userdata, expr->query);
 
     /* ref baton until on_series_solve_done */
     seriesBatonReference(baton, "series_solve_sid_expr");
 
-    if ((sts = series_parse(expr->query, &sp, &errstr, arg)) == 0) {
+    if ((sts = series_parse(expr->query, &sp, &errstr)) == 0) {
 	pmSeriesSetSlots(&settings->module, baton->slots);
-	settings->module = *baton->module; /* struct cpy */
+	settings->module = *baton->module; /* struct copy */
 
 	sts = series_solve(settings, sp.expr, &baton->query.timing,
-	    PM_SERIES_FLAG_NONE, baton);
+			    PM_SERIES_FLAG_NONE, baton);
     }
 
+    freeSeriesGetSID(sid);
     return sts;
 }
 
@@ -1523,10 +1524,13 @@ series_query_expr_reply(redisClusterAsyncContext *c, void *r, void *arg)
 	infofmt(msg, "expected array of one string element (got %zu) from series %s %s (type=%s)",
 		reply->elements, sid->name, HMGET, redis_reply_type(reply));
 	batoninfo(baton, PMLOG_RESPONSE, msg);
+	freeSeriesGetSID(sid);
     } else if (reply->element[0]->type == REDIS_REPLY_STRING) {
 	expr.query = sdsempty();
     	if ((sts = extract_string(baton, sid->name, reply->element[0], &expr.query, "query")) < 0) {
 	    baton->error = sts;
+	    sdsfree(expr.query);
+	    freeSeriesGetSID(sid);
 	} else {
 	    /* Parse the expr (with timing) and series solve the resulting expr tree */
 	    baton->error = series_solve_sid_expr(&series_solve_values_settings, &expr, arg);
@@ -1739,10 +1743,15 @@ series_query_report_matches(void *arg)
 
     seriesBatonReference(baton, "series_query_report_matches");
 
-    has_function = series_calculate(baton, baton->query.root, 0);
-    
+    has_function = series_calculate(baton->query.root, 0, arg);
+
+    /*
+     * Store the canonical query to Redis if this query statement has
+     * function operation.
+     */
     if (has_function != 0)
 	series_redis_hash_expression(baton, hashbuf, sizeof(hashbuf));
+
     series_report_set(baton, baton->query.root);
     series_query_end_phase(baton);
 }
@@ -2633,9 +2642,9 @@ series_rate_check(pmSeriesDesc desc)
  * The number of samples in result is one less than the original samples. 
  */
 static void
-series_calculate_rate(node_t *np)
+series_calculate_rate(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     pmSeriesValue	s_pmval, t_pmval;
     unsigned int	n_instances, n_samples, i, j, k;
     double		s_data, t_data, mult;
@@ -2648,9 +2657,8 @@ series_calculate_rate(node_t *np)
     for (i = 0; i < np->value_set.num_series; i++) {
 	n_samples = np->value_set.series_values[i].num_samples;
 	if (series_rate_check(np->value_set.series_values[i].series_desc) == 0) {
-	    if (n_samples > 0) {
-		n_instances = np->value_set.series_values[i].series_sample[0].num_instances;
-	    }
+	    n_instances = (n_samples == 0) ? 0 :
+		np->value_set.series_values[i].series_sample[0].num_instances;
 	    for (j = 1; j < n_samples; j++) {
 		if (np->value_set.series_values[i].series_sample[j].num_instances != n_instances) {
 		    if (pmDebugOptions.query && pmDebugOptions.desperate)
@@ -2720,9 +2728,9 @@ series_calculate_rate(node_t *np)
  * Compare and pick the max instance value(s) among samples.
  */
 static void
-series_calculate_time_domain_max(node_t *np)
+series_calculate_time_domain_max(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		max_data, data;
     int			max_pointer;
@@ -2785,9 +2793,9 @@ series_calculate_time_domain_max(node_t *np)
  * Compare and pick the maximal instance value(s) among samples for each metric.
  */
 static void
-series_calculate_max(node_t *np)
+series_calculate_max(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		max_data, data;
     int			max_pointer;
@@ -2849,9 +2857,9 @@ series_calculate_max(node_t *np)
  * Compare and pick the minimal value(s) among samples for each metric across time.
  */
 static void
-series_calculate_time_domain_min(node_t *np)
+series_calculate_time_domain_min(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		min_data, data;
     int			min_pointer;
@@ -2914,9 +2922,9 @@ series_calculate_time_domain_min(node_t *np)
  * Compare and pick the minimal instance value(s) among samples for each metric.
  */
 static void
-series_calculate_min(node_t *np)
+series_calculate_min(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		min_data, data;
     int			min_pointer;
@@ -3071,9 +3079,9 @@ series_pmAtomValue_conv_str(int type, char *str, pmAtomValue *val, int max_len)
  * metrics to be modified. 
  */
 static void
-series_calculate_rescale(node_t *np)
+series_calculate_rescale(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     double		mult;
     pmUnits		iunit;
     char		*errmsg, str_val[256];
@@ -3166,9 +3174,9 @@ series_abs_pmAtomValue(int type, pmAtomValue *val)
 }
 
 static void
-series_calculate_abs(node_t *np)
+series_calculate_abs(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     pmAtomValue		val;
     int			type, sts, str_len, i, j, k;
     char		str_val[256];
@@ -3209,9 +3217,9 @@ series_calculate_abs(node_t *np)
  * calculate top k instances among samples
  */
 static void
-series_calculate_time_domain_topk(node_t *np)
+series_calculate_time_domain_topk(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k, l;
     sds			msg;
     pmSeriesValue	inst;
@@ -3295,9 +3303,9 @@ series_calculate_time_domain_topk(node_t *np)
  * calculate top k series per-instance over time samples
  */
 static void
-series_calculate_topk(node_t *np)
+series_calculate_topk(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k, l;
     double		data;
     int 		n, ind;
@@ -3380,9 +3388,9 @@ series_calculate_topk(node_t *np)
  * calculate standard deviation series per-instance over time samples
  */
 static void
-series_calculate_time_domain_standard_deviation(node_t *np)
+series_calculate_time_domain_standard_deviation(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		sum_data, mean, sd, data;
     sds			msg;
@@ -3448,9 +3456,9 @@ series_calculate_time_domain_standard_deviation(node_t *np)
  * calculate standard deviation series per-instance over time samples
  */
 static void
-series_calculate_standard_deviation(node_t *np)
+series_calculate_standard_deviation(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		sum_data, data, sd, mean;
     char		stdev[64];
@@ -3513,9 +3521,9 @@ series_calculate_standard_deviation(node_t *np)
  * calculate the nth percentile in the time series for each sample across time
  */
 static void
-series_calculate_time_domain_nth_percentile(node_t *np)
+series_calculate_time_domain_nth_percentile(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k, l, m;
     int			n, instance_idx, rank, *n_pointer;
     double              *n_data, data, rank_d;
@@ -3594,9 +3602,9 @@ series_calculate_time_domain_nth_percentile(node_t *np)
  * calculate the nth percentile series per-instance over time samples
  */
 static void
-series_calculate_nth_percentile(node_t *np)
+series_calculate_nth_percentile(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     unsigned int	n_series, n_samples, n_instances, i, j, k, l, m;
     int			n, instance_idx, rank, *n_pointer;
     double              *n_data, data, rank_d;
@@ -3694,10 +3702,10 @@ series_get_time_domain_histogram(node_t *np)
 {
     seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
-    int			mid_index, q3_ind, bin, bin_size, amount, pointer;
+    int			mid_index, q3_ind, bin, bin_size, amount, pointer, max;
     double		*n_data, data, width, q1, q3, iqr, start, end;
     sds			msg;
-    char		start_value[64], end_value[64], amount_value[64];
+    char		start_value[64], end_value[64], amount_value[64], ratio[64];
 //     pmSeriesValue       inst;
 
     n_series = np->left->value_set.num_series;
@@ -3753,6 +3761,7 @@ series_get_time_domain_histogram(node_t *np)
 		start = n_data[0];
 		end = start + width;
 		pointer = 0;
+		max = 0;
 
 		for (bin = 0; bin < bin_size; bin++){
 		    amount = 0;
@@ -3766,13 +3775,22 @@ series_get_time_domain_histogram(node_t *np)
 			    break;
 			}
 		    }
+		    if (amount > max)
+		    	max = amount;
+
 		    pmsprintf(start_value, sizeof(start_value), "%le", start);
 		    pmsprintf(end_value, sizeof(end_value), "%le", end);
 		    pmsprintf(amount_value, sizeof(amount_value), "%d", amount);
+		    pmsprintf(ratio, sizeof(ratio), "%d", amount/n_instances);
 		    np->value_set.series_values[i].series_sample[j].bin_info[bin].start = sdsnew(start_value);
 		    np->value_set.series_values[i].series_sample[j].bin_info[bin].end = sdsnew(end_value);
 		    np->value_set.series_values[i].series_sample[j].bin_info[bin].amount = sdsnew(amount_value);
+		    np->value_set.series_values[i].series_sample[j].bin_info[bin].total_inst = n_instances;
+		    np->value_set.series_values[i].series_sample[j].bin_info[bin].ratio = sdsnew(ratio);
 		}
+		// pmsprintf(max_freq, sizeof(max_freq), "%d", max);
+		// np->value_set.series_values[i].series_sample[j].max_freq = sdsnew(max_freq);
+		
 	    }
 	} else {
 	    np->value_set.series_values[i].num_samples = 0;
@@ -3797,9 +3815,10 @@ series_get_instance_domain_histogram(node_t *np)
  * calculate sum or avg in the time series for each sample across time
  */
 static void
-series_calculate_time_domain_statistical(node_t *np, nodetype_t func)
+series_calculate_time_domain_statistical(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
+    nodetype_t		func = np->type;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		sum_data, data;
     char		sum_data_str[64];
@@ -3878,9 +3897,10 @@ series_calculate_time_domain_statistical(node_t *np, nodetype_t func)
  * calculate sum or avg series per-instance over time samples
  */
 static void
-series_calculate_statistical(node_t *np, nodetype_t func)
+series_calculate_statistical(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
+    nodetype_t		func = np->type;
     unsigned int	n_series, n_samples, n_instances, i, j, k;
     double		sum_data, data;
     char		sum_data_str[64];
@@ -3985,9 +4005,9 @@ series_floor_pmAtomValue(int type, pmAtomValue *val)
 }
 
 static void
-series_calculate_floor(node_t *np)
+series_calculate_floor(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     pmAtomValue		val;
     int			type, sts, str_len, i, j, k;
     char		str_val[256];
@@ -4070,9 +4090,9 @@ series_log_pmAtomValue(int itype, int *otype, pmAtomValue *val, int is_natural_l
  * Return the logarithm of x to base b (log_b^x).
  */
 static void
-series_calculate_log(node_t *np)
+series_calculate_log(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     double		base;
     pmAtomValue		val;
     int			i, j, k, itype, otype=PM_TYPE_UNKNOWN;
@@ -4164,9 +4184,9 @@ series_sqrt_pmAtomValue(int itype, int *otype, pmAtomValue *val)
 }
 
 static void
-series_calculate_sqrt(node_t *np)
+series_calculate_sqrt(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     pmAtomValue		val;
     int			i, j, k, itype, otype=PM_TYPE_UNKNOWN;
     int			sts, str_len;
@@ -4233,9 +4253,9 @@ series_round_pmAtomValue(int type, pmAtomValue *val)
 }
 
 static void
-series_calculate_round(node_t *np)
+series_calculate_round(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     pmAtomValue		val;
     int			i, j, k, type, sts, str_len;
     char		str_val[256];
@@ -4306,12 +4326,13 @@ series_calculate_binary_check(int ope_type, seriesQueryBaton *baton,
 	baton->error = -EPROTO;
 	return -1;
     }
+
     /*
      * For addition and subtraction all dimensions for each of
      * the operands and result are identical.
      */
     if ((ope_type == N_PLUS || ope_type == N_MINUS) &&
-		compare_pmUnits_dim(&left->meta.units, &right->meta.units) != 0) {
+	compare_pmUnits_dim(&left->meta.units, &right->meta.units) != 0) {
 	infofmt(msg, "Dimensions of two operands mismatch\n");
 	batoninfo(baton, PMLOG_ERROR, msg);
 	baton->error = -EPROTO;
@@ -4624,9 +4645,9 @@ series_binary_meta_update(node_t *left, pmUnits *large_units, int *l_sem, int *r
 }
 
 static void
-series_calculate_plus(node_t *np)
+series_calculate_plus(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     node_t		*left = np->left, *right = np->right;
     int			l_type, r_type, otype=PM_TYPE_UNKNOWN;
     int			l_sem, r_sem, j, k;
@@ -4676,9 +4697,9 @@ series_calculate_plus(node_t *np)
 }
 
 static void
-series_calculate_minus(node_t *np)
+series_calculate_minus(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     node_t		*left = np->left, *right = np->right;
     unsigned int	num_samples, num_instances, j, k;
     pmAtomValue		l_val, r_val;
@@ -4728,9 +4749,9 @@ series_calculate_minus(node_t *np)
 }
 
 static void
-series_calculate_star(node_t *np)
+series_calculate_star(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     node_t		*left = np->left, *right = np->right;
     unsigned int	num_samples, num_instances, j, k;
     pmAtomValue		l_val, r_val;
@@ -4780,9 +4801,9 @@ series_calculate_star(node_t *np)
 }
 
 static void
-series_calculate_slash(node_t *np)
+series_calculate_slash(node_t *np, void *arg)
 {
-    seriesQueryBaton	*baton = (seriesQueryBaton *)np->baton;
+    seriesQueryBaton	*baton = (seriesQueryBaton *)arg;
     node_t		*left = np->left, *right = np->right;
     unsigned int	num_samples, num_instances, j, k;
     pmAtomValue		l_val, r_val;
@@ -4791,12 +4812,16 @@ series_calculate_slash(node_t *np)
     int			l_sem, r_sem;
     sds			msg;
 
-    if (left->value_set.num_series == 0 || right->value_set.num_series == 0) return;
-    if (series_calculate_binary_check(N_SLASH, baton, left, right, &l_type, &r_type, &l_sem, &r_sem,
-		 &l_units, &r_units, &large_units, left->value_set.series_values[0].series_desc.indom,
-		 right->value_set.series_values[0].series_desc.indom) != 0) {
+    if (left->value_set.num_series == 0 || right->value_set.num_series == 0)
 	return;
-    }
+
+    if (series_calculate_binary_check(N_SLASH, baton, left, right,
+		&l_type, &r_type, &l_sem, &r_sem,
+		&l_units, &r_units, &large_units,
+		left->value_set.series_values[0].series_desc.indom,
+		right->value_set.series_values[0].series_desc.indom) != 0)
+	return;
+
     num_samples = left->value_set.series_values[0].num_samples;
 
     for (j = 0; j < num_samples; j++) {
@@ -4825,7 +4850,6 @@ series_calculate_slash(node_t *np)
 
     series_binary_meta_update(left, &large_units, &l_sem, &r_sem, &otype);
     np->value_set = left->value_set;
-
 }
 
 /* 
@@ -4837,110 +4861,99 @@ series_calculate_slash(node_t *np)
  * store them into this node.
  */
 static int
-series_calculate(seriesQueryBaton *baton, node_t *np, int level)
+series_calculate(node_t *np, int level, void *arg)
 {
     int		sts;
 
     if (np == NULL)
 	return 0;
-    if ((sts = series_calculate(baton, np->left, level+1)) < 0)
+    if ((sts = series_calculate(np->left, level+1, arg)) < 0)
 	return sts;
-    if ((sts = series_calculate(baton, np->right, level+1)) < 0)
+    if ((sts = series_calculate(np->right, level+1, arg)) < 0)
 	return sts;
 
-    np->baton = baton;
     switch ((sts = np->type)) {
-	case N_RATE:
-	    series_calculate_rate(np);
-	    break;
-	case N_MAX:
-	case N_MAX_INST:
-	    series_calculate_max(np);
-	    break;
-	case N_MAX_SAMPLE:
-	    series_calculate_time_domain_max(np);
-	    break;
-	case N_MIN:
-	case N_MIN_INST:
-	    series_calculate_min(np);
-	    break;
-	case N_MIN_SAMPLE:
-	    series_calculate_time_domain_min(np);
-	    break;
-	case N_RESCALE:
-	    series_calculate_rescale(np);
-	    break;
-	case N_ABS:
-	    series_calculate_abs(np);
-	    break;
-	case N_FLOOR:
-	    series_calculate_floor(np);
-	    break;
-	case N_LOG:
-	    series_calculate_log(np);
-	    break;
-	case N_SQRT:
-	    series_calculate_sqrt(np);
-	    break;
-	case N_ROUND:
-	    series_calculate_round(np);
-	    break;
-	case N_PLUS:
-	    series_calculate_plus(np);
-	    break;
-	case N_MINUS:
-	    series_calculate_minus(np);
-	    break;
-	case N_STAR:
-	    series_calculate_star(np);
-	    break;
-	case N_SLASH:
-	    series_calculate_slash(np);
-	    break;
-	case N_AVG:
-	    series_calculate_statistical(np, N_AVG);
-	    break;
-	case N_AVG_INST:
-	    series_calculate_statistical(np, N_AVG_INST);
-	    sts = N_AVG_INST;
-	    break;
-	case N_AVG_SAMPLE:
-	    series_calculate_time_domain_statistical(np, N_AVG_SAMPLE);
-	    sts = N_AVG_SAMPLE;
-	    break;
-	case N_SUM:
-	    series_calculate_statistical(np, N_SUM);
-	    break;
-	case N_SUM_INST:
-	    series_calculate_statistical(np, N_SUM_INST);
-	    break;
-	case N_SUM_SAMPLE:
-	    series_calculate_time_domain_statistical(np, N_SUM_SAMPLE);
-	    break;
-	case N_STDEV_INST:
-	    series_calculate_standard_deviation(np);
-	    break;
-	case N_STDEV_SAMPLE:
-	    series_calculate_time_domain_standard_deviation(np);
-	    break;
-	case N_TOPK_INST:
-	    series_calculate_topk(np);
-	    break;
-	case N_TOPK_SAMPLE:
-	    series_calculate_time_domain_topk(np);
-            break;
-	case N_NTH_PERCENTILE_INST:
-	    series_calculate_nth_percentile(np);
-	    break;
-	case N_NTH_PERCENTILE_SAMPLE:
-	    series_calculate_time_domain_nth_percentile(np);
-	    break;
-	case N_HISTOGRAM:
-	    series_get_time_domain_histogram(np);
-	    break;
-	default:
-	    sts = 0;	/* no function */
-	    break;
+    case N_RATE:
+	series_calculate_rate(np, arg);
+	break;
+    case N_MAX:
+    case N_MAX_INST:
+	series_calculate_max(np, arg);
+	break;
+    case N_MAX_SAMPLE:
+	series_calculate_time_domain_max(np, arg);
+	break;
+    case N_MIN:
+    case N_MIN_INST:
+	series_calculate_min(np, arg);
+	break;
+    case N_MIN_SAMPLE:
+	series_calculate_time_domain_min(np, arg);
+	break;
+    case N_RESCALE:
+	series_calculate_rescale(np, arg);
+	break;
+    case N_ABS:
+	series_calculate_abs(np, arg);
+	break;
+    case N_FLOOR:
+	series_calculate_floor(np, arg);
+	break;
+    case N_LOG:
+	series_calculate_log(np, arg);
+	break;
+    case N_SQRT:
+	series_calculate_sqrt(np, arg);
+	break;
+    case N_ROUND:
+	series_calculate_round(np, arg);
+	break;
+    case N_PLUS:
+	series_calculate_plus(np, arg);
+	break;
+    case N_MINUS:
+	series_calculate_minus(np, arg);
+	break;
+    case N_STAR:
+	series_calculate_star(np, arg);
+	break;
+    case N_SLASH:
+	series_calculate_slash(np, arg);
+	break;
+    case N_AVG:
+    case N_SUM:
+    case N_AVG_INST:
+    case N_SUM_INST:
+	series_calculate_statistical(np, arg);
+	break;
+    case N_AVG_SAMPLE:
+    case N_SUM_SAMPLE:
+	series_calculate_time_domain_statistical(np, arg);
+	break;
+    case N_STDEV_INST:
+	series_calculate_standard_deviation(np, arg);
+	break;
+    case N_STDEV_SAMPLE:
+	series_calculate_time_domain_standard_deviation(np, arg);
+	break;
+    case N_TOPK_INST:
+	series_calculate_topk(np, arg);
+	break;
+    case N_TOPK_SAMPLE:
+	series_calculate_time_domain_topk(np, arg);
+        break;
+    case N_NTH_PERCENTILE_INST:
+	series_calculate_nth_percentile(np, arg);
+	break;
+    case N_NTH_PERCENTILE_SAMPLE:
+	series_calculate_time_domain_nth_percentile(np, arg);
+	break;
+    case N_HISTOGRAM:
+	series_get_time_domain_histogram(np);
+	break;
+    default:
+	sts = 0;	/* no function */
+	break;
     }
     return sts;
 }
@@ -5030,17 +5043,18 @@ series_redis_hash_expression(seriesQueryBaton *baton, char *hashbuf, int len_has
 
     for (i = 0; i < num_series; i++) {
 	if (!np->value_set.series_values[i].compatibility) {
-	    infofmt(msg, "Descriptors for metric '%s' do not satisfy compatibility between different hosts/sources.\n",
+	    infofmt(msg, "Descriptors for metric '%s' between different sources are incompatible.\n",
 		np->value_set.series_values[i].metric_name);
 	    batoninfo(baton, PMLOG_ERROR, msg);
 	    baton->error = -EPROTO;
-	    continue;
+	    break;
 	}
 
 	if (strncmp(np->value_set.series_values[i].series_desc.units, "none", 4) == 0)
 	    memset(&units0, 0, sizeof(units0));
-	else if (pmParseUnitsStr(np->value_set.series_values[i].series_desc.units,
-	    &units0, &mult, &errmsg) != 0) {
+	else if (pmParseUnitsStr(
+			np->value_set.series_values[i].series_desc.units,
+			&units0, &mult, &errmsg) != 0) {
 	    np->value_set.series_values[i].compatibility = 0;
 	    infofmt(msg, "Invalid units string: %s\n",
 		    np->value_set.series_values[i].series_desc.units);
@@ -5069,7 +5083,12 @@ series_redis_hash_expression(seriesQueryBaton *baton, char *hashbuf, int len_has
 
 	    if (check_compatibility(&units0, &units1) != 0) {
 		np->value_set.series_values[j].compatibility = 0;
-		infofmt(msg, "Incompatible units between operand metrics or expressions\n");
+		infofmt(msg, "Incompatible units between operand metrics or expressions\n"
+				"'%s' (%s)\nvs\'%s' (%s)\n",
+				np->value_set.series_values[i].metric_name,
+				np->value_set.series_values[i].series_desc.units,
+				np->value_set.series_values[j].metric_name,
+				np->value_set.series_values[j].series_desc.units);
 		batoninfo(baton, PMLOG_ERROR, msg);
 		baton->error = -EPROTO;
 		break;
@@ -5134,7 +5153,8 @@ series_query_funcs_report_values(void *arg)
     seriesBatonReference(baton, "series_query_funcs_report_values");
 
     /* For function-type nodes, calculate actual values */
-    has_function = series_calculate(baton, baton->query.root, 0);
+    has_function = series_calculate(baton->query.root, 0, baton->userdata);
+
     /*
      * Store the canonical query to Redis if this query statement has
      * function operation.

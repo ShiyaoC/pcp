@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2012-2021 Red Hat.
+# Copyright (c) 2012-2022 Red Hat.
 # Copyright (c) 2000,2004 Silicon Graphics, Inc.  All Rights Reserved.
 # 
 # This program is free software; you can redistribute it and/or modify it
@@ -69,7 +69,6 @@ pcp.spec: pcp.spec.in
 	    -e's|@pmda_bcc@|$(PMDA_BCC)|g' \
 	    -e's|@pmda_bpf@|$(PMDA_BPF)|g' \
 	    -e's|@pmda_bpftrace@|$(PMDA_BPFTRACE)|g' \
-	    -e's|@pmda_podman@|$(PMDA_PODMAN)|g' \
 	    -e's|@pmda_statsd@|$(PMDA_STATSD)|g' \
 	    -e's|@pmda_systemd@|$(PMDA_SYSTEMD)|g' \
 	    -e's|@pmda_infiniband@|$(PMDA_INFINIBAND)|g' \
@@ -106,6 +105,7 @@ pcp.spec: pcp.spec.in
 	    -e's|@have_perl@|$(HAVE_PERL)|g' \
 	    -e"s|@build_root@|$${DIST_ROOT}|g" \
 	    -e's|@pcp_pmcdconf_path@|$(PCP_PMCDCONF_PATH)|g' \
+	    -e's|@pcp_systemdsysusers_dir@|$(PCP_SYSTEMDSYSUSERS_DIR)|g' \
 	    -e's|@pcp_systemdtmpfiles_dir@|$(PCP_SYSTEMDTMPFILES_DIR)|g' \
 	    -e's|@pcp_sysconfig_dir@|$(PCP_SYSCONFIG_DIR)|g' \
 	    -e's|@pcp_sysconf_dir@|$(PCP_SYSCONF_DIR)|g' \

@@ -794,7 +794,6 @@ enable_selinux
 SEINFO
 PMDA_POSTFIX
 QSHAPE
-PMDA_PODMAN
 PMDA_STATSD
 lib_for_chan
 lib_for_hdr_histogram
@@ -900,7 +899,6 @@ PMDA_BPF
 pmdabpf_vmlinuxh
 pmdabpf_arch
 pmdabpf_bpftool
-PMDABPF_BPFTOOL
 pmdabpf_llvm_strip
 PMDABPF_LLVM_STRIP
 pmdabpf_clang
@@ -946,6 +944,8 @@ sd_service_type
 enable_systemd
 pcp_systemdunit_dir
 SYSTEMD_SYSTEMUNITDIR
+pcp_systemdsysusers_dir
+SYSTEMD_SYSUSERSDIR
 pcp_systemdtmpfiles_dir
 SYSTEMD_TMPFILESDIR
 enable_avahi
@@ -1088,7 +1088,6 @@ with_python3
 with_dstat_symlink
 with_perfevent
 with_pmdastatsd
-with_pmdapodman
 with_pmdabcc
 with_pmdabpf
 with_pmdabpf_clang
@@ -1141,6 +1140,7 @@ gperftools_LIBS
 avahi_CFLAGS
 avahi_LIBS
 SYSTEMD_TMPFILESDIR
+SYSTEMD_SYSUSERSDIR
 SYSTEMD_SYSTEMUNITDIR
 libbpf_CFLAGS
 libbpf_LIBS
@@ -1832,7 +1832,6 @@ Optional Packages:
                           is on)
   --with-perfevent        enable perfevent pmda (default is on)
   --with-pmdastatsd       enable statds pmda (default is on)
-  --with-pmdapodman       enable podman pmda (default is on)
   --with-pmdabcc          enable BCC pmda (default is on)
   --with-pmdabpf          enable BPF pmda (default is on)
   --with-pmdabpf-clang    path to clang 10+ (default is empty for auto
@@ -1840,8 +1839,7 @@ Optional Packages:
   --with-pmdabpf-llvm-strip
                           path to llvm-strip 10+ (default is empty for auto
                           discovery)
-  --with-pmdabpf-bpftool  path to bpftool (default is empty for auto
-                          discovery)
+  --with-pmdabpf-bpftool  path to bpftool (default is empty to build)
   --with-pmdabpf-btf      path to kernel BTF sources (default is empty to use
                           vendored kernel type information)
   --with-pmdabpftrace     enable bpftrace pmda (default is on)
@@ -1901,6 +1899,8 @@ Some influential environment variables:
   avahi_LIBS  linker flags for avahi, overriding pkg-config
   SYSTEMD_TMPFILESDIR
               value of tmpfilesdir for systemd, overriding pkg-config
+  SYSTEMD_SYSUSERSDIR
+              value of sysusersdir for systemd, overriding pkg-config
   SYSTEMD_SYSTEMUNITDIR
               value of systemdsystemunitdir for systemd, overriding pkg-config
   libbpf_CFLAGS
@@ -3580,16 +3580,6 @@ then :
   withval=$with_pmdastatsd; do_pmdastatsd=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-pmdastatsd=$withval"
 else $as_nop
   do_pmdastatsd=check
-fi
-
-
-
-# Check whether --with-pmdapodman was given.
-if test ${with_pmdapodman+y}
-then :
-  withval=$with_pmdapodman; do_pmdapodman=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-pmdapodman=$withval"
-else $as_nop
-  do_pmdapodman=check
 fi
 
 
@@ -6923,6 +6913,33 @@ else $as_nop
 fi
 
 
+if test -n "$SYSTEMD_SYSUSERSDIR"; then
+    pkg_cv_SYSTEMD_SYSUSERSDIR="$SYSTEMD_SYSUSERSDIR"
+ elif test -n "$PKG_CONFIG"; then
+    if test -n "$PKG_CONFIG" && \
+    { { printf "%s\n" "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"systemd\""; } >&5
+  ($PKG_CONFIG --exists --print-errors "systemd") 2>&5
+  ac_status=$?
+  printf "%s\n" "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+  test $ac_status = 0; }; then
+  pkg_cv_SYSTEMD_SYSUSERSDIR=`$PKG_CONFIG --variable="sysusersdir" "systemd" 2>/dev/null`
+		      test "x$?" != "x0" && pkg_failed=yes
+else
+  pkg_failed=yes
+fi
+ else
+    pkg_failed=untried
+fi
+SYSTEMD_SYSUSERSDIR=$pkg_cv_SYSTEMD_SYSUSERSDIR
+
+if test "x$SYSTEMD_SYSUSERSDIR" = x""
+then :
+  pcp_systemdsysusers_dir=$pcp_lib32_dir/sysusers.d
+else $as_nop
+  pcp_systemdsysusers_dir=$SYSTEMD_SYSUSERSDIR
+fi
+
+
 if test -n "$SYSTEMD_SYSTEMUNITDIR"; then
     pkg_cv_SYSTEMD_SYSTEMUNITDIR="$SYSTEMD_SYSTEMUNITDIR"
  elif test -n "$PKG_CONFIG"; then
@@ -9213,52 +9230,20 @@ fi
 pmdabpf_llvm_strip=$PMDABPF_LLVM_STRIP
 
 
+build_bpftool=false
 if test -z "$PMDABPF_BPFTOOL"; then
-    # Extract the first word of "bpftool", so it can be a program name with args.
-set dummy bpftool; ac_word=$2
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
-printf %s "checking for $ac_word... " >&6; }
-if test ${ac_cv_path_PMDABPF_BPFTOOL+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  case $PMDABPF_BPFTOOL in
-  [\\/]* | ?:[\\/]*)
-  ac_cv_path_PMDABPF_BPFTOOL="$PMDABPF_BPFTOOL" # Let the user override the test with a path.
-  ;;
-  *)
-  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  case $as_dir in #(((
-    '') as_dir=./ ;;
-    */) ;;
-    *) as_dir=$as_dir/ ;;
-  esac
-    for ac_exec_ext in '' $ac_executable_extensions; do
-  if as_fn_executable_p "$as_dir$ac_word$ac_exec_ext"; then
-    ac_cv_path_PMDABPF_BPFTOOL="$as_dir$ac_word$ac_exec_ext"
-    printf "%s\n" "$as_me:${as_lineno-$LINENO}: found $as_dir$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-  done
-IFS=$as_save_IFS
-
-  ;;
-esac
-fi
-PMDABPF_BPFTOOL=$ac_cv_path_PMDABPF_BPFTOOL
-if test -n "$PMDABPF_BPFTOOL"; then
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $PMDABPF_BPFTOOL" >&5
-printf "%s\n" "$PMDABPF_BPFTOOL" >&6; }
+    if $have_libelf; then
+        PMDABPF_BPFTOOL=`realpath vendor/github.com/libbpf/bpftool/src/bpftool`
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: using bpftool at $PMDABPF_BPFTOOL" >&5
+printf "%s\n" "$as_me: using bpftool at $PMDABPF_BPFTOOL" >&6;}
+        build_bpftool=true
+    else
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: not building bpftool because libelf was not found, please use --with-pmdabpf-bpftool to specify bpftool" >&5
+printf "%s\n" "$as_me: not building bpftool because libelf was not found, please use --with-pmdabpf-bpftool to specify bpftool" >&6;}
+    fi
 else
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
-printf "%s\n" "no" >&6; }
-fi
-
-
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: using bpftool at $PMDABPF_BPFTOOL" >&5
+printf "%s\n" "$as_me: using bpftool at $PMDABPF_BPFTOOL" >&6;}
 fi
 pmdabpf_bpftool=$PMDABPF_BPFTOOL
 
@@ -9304,7 +9289,7 @@ then :
 
         $have_libbpf && $have_libelf && \
 	test $clang_major_version -ge 10 && \
-	test -x "$pmdabpf_bpftool" && \
+	(test -x "$pmdabpf_bpftool" || $build_bpftool) && \
 	test -f "$pmdabpf_vmlinuxh" && \
 	pmda_bpf=true
 
@@ -9433,10 +9418,10 @@ printf %s "checking for any perl version... " >&6; }
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $pcp_perl_prog" >&5
 printf "%s\n" "$pcp_perl_prog" >&6; }
 
+        if test "$have_perl" = true
+    then
         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if ExtUtils::MakeMaker is installed" >&5
 printf %s "checking if ExtUtils::MakeMaker is installed... " >&6; }
-    if test "$have_perl" = true
-    then
         $pcp_perl_prog -e "use ExtUtils::MakeMaker" 2>/dev/null
         if test $? -eq 0
         then
@@ -13286,19 +13271,6 @@ if $pmda_statsd; then { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes"
 printf "%s\n" "yes" >&6; }; else { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
 printf "%s\n" "no" >&6; }; fi
 
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if the podman PMDA should be included" >&5
-printf %s "checking if the podman PMDA should be included... " >&6; }
-pmda_podman=true
-if test "x$do_pmdapodman" = "xno"
-then :
-  pmda_podman=false
-fi
-PMDA_PODMAN=$pmda_podman
-
-if $pmda_podman; then { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-printf "%s\n" "yes" >&6; }; else { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
-printf "%s\n" "no" >&6; }; fi
-
 pmda_postfix=false
 for ac_prog in qshape
 do
@@ -13576,7 +13548,7 @@ then :
     && pcp_selinux_hostname_exec_map=true
 
     seinfo -x --class=bpf $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)bpf$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)bpf$' >/dev/null \
     && pcp_selinux_bpf=true
 
     seinfo -a 2>/dev/null \
@@ -13592,44 +13564,44 @@ then :
     && pcp_selinux_capability2_bpf=true
 
     seinfo -x --class=icmp_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)icmp_socket$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)icmp_socket$' >/dev/null \
     && pcp_selinux_icmp_socket_class=true
 
     seinfo -x --class=lockdown $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)lockdown$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)lockdown$' >/dev/null \
     && pcp_selinux_lockdown_class=true
 
 
     seinfo -x --class=netlink_selinux_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)netlink_selinux_socket$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)netlink_selinux_socket$' >/dev/null \
     && pcp_selinux_netlink_selinux_socket_class=true
 
     seinfo -x --class=netlink_audit_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)netlink_audit_socket$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)netlink_audit_socket$' >/dev/null \
     && pcp_selinux_netlink_audit_socket_class=true
 
     seinfo -x --class=sock_file $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)sock_file$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)sock_file$' >/dev/null \
     && pcp_selinux_sock_file_class=true
 
     seinfo -x --class=security $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)security$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)security$' >/dev/null \
     && pcp_selinux_security_class=true
 
             seinfo -x --class=dir $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)dir$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)dir$' >/dev/null \
     && pcp_selinux_dir_class=true
 
     seinfo -x --class=rawip_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)rawip_socket$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)rawip_socket$' >/dev/null \
     && pcp_selinux_rawip_socket_class=true
 
     seinfo -x --class=netlink_generic_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)netlink_generic_socket$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)netlink_generic_socket$' >/dev/null \
     && pcp_selinux_netlink_generic_socket_class=true
 
     seinfo -x --class=netlink_tcpdiag_socket $seinfo_common_flag 2>/dev/null \
-    | egrep '^[ 	][ 	]*(class |)netlink_tcpdiag_socket$' >/dev/null \
+    | grep -E '^[ 	][ 	]*(class |)netlink_tcpdiag_socket$' >/dev/null \
     && pcp_selinux_netlink_tcpdiag_socket_class=true
 
 
@@ -13880,6 +13852,12 @@ then :
   printf "%s\n" "#define HAVE_UNSETENV 1" >>confdefs.h
 
 fi
+ac_fn_c_check_func "$LINENO" "getrusage" "ac_cv_func_getrusage"
+if test "x$ac_cv_func_getrusage" = xyes
+then :
+  printf "%s\n" "#define HAVE_GETRUSAGE 1" >>confdefs.h
+
+fi
 
 ac_fn_c_check_func "$LINENO" "select" "ac_cv_func_select"
 if test "x$ac_cv_func_select" = xyes
@@ -14034,6 +14012,12 @@ ac_fn_c_check_func "$LINENO" "fchmod" "ac_cv_func_fchmod"
 if test "x$ac_cv_func_fchmod" = xyes
 then :
   printf "%s\n" "#define HAVE_FCHMOD 1" >>confdefs.h
+
+fi
+ac_fn_c_check_func "$LINENO" "fchown" "ac_cv_func_fchown"
+if test "x$ac_cv_func_fchown" = xyes
+then :
+  printf "%s\n" "#define HAVE_FCHOWN 1" >>confdefs.h
 
 fi
 ac_fn_c_check_func "$LINENO" "getcwd" "ac_cv_func_getcwd"

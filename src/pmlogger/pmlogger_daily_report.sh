@@ -287,23 +287,31 @@ then
     fi
 fi
 
-# write date-and-timestamp to be checked by -p polling
+# if it looks like we can create/update the date-and-timestamp
+# then do it ... this will be checked by -p polling
 #
-if _save_prev_file $PCP_LOG_DIR/pmlogger/pmlogger_daily_report.stamp
+if [ -w $PCP_LOG_DIR/pmlogger ]
 then
-    :
-else
-    echo "Warning: cannot save previous date-and-timestamp" >&2
-fi
-# only update date-and-timestamp if we can write the file
-#
-pmdate '# %Y-%m-%d %H:%M:%S
+    if [ ! -f $PCP_LOG_DIR/pmlogger/pmlogger_daily_report.stamp \
+           -o -w $PCP_LOG_DIR/pmlogger/pmlogger_daily_report.stamp ]
+    then
+	if _save_prev_file $PCP_LOG_DIR/pmlogger/pmlogger_daily_report.stamp
+	then
+	    :
+	else
+	    echo "Warning: cannot save previous date-and-timestamp" >&2
+	fi
+	# only update date-and-timestamp if we can write the file
+	#
+	pmdate '# %Y-%m-%d %H:%M:%S
 %s' >$tmp/stamp
-if cp $tmp/stamp $PCP_LOG_DIR/pmlogger/pmlogger_daily_report.stamp
-then
-    :
-else
-    echo "Warning: cannot install new date-and-timestamp" >&2
+	if cp $tmp/stamp $PCP_LOG_DIR/pmlogger/pmlogger_daily_report.stamp
+	then
+	    :
+	else
+	    echo "Warning: cannot install new date-and-timestamp" >&2
+	fi
+    fi
 fi
 
 # After argument checking, everything must be logged to ensure no mail is
@@ -331,6 +339,7 @@ exec 1>"$PROGLOG" 2>&1
 # into temporary files and use these, to avoid repeated
 # uncompressing for pmrep below.
 #
+ORIG_ARCHIVEPATH="$ARCHIVEPATH"
 ARCHIVEPATH=`_uncompress $ARCHIVEPATH`
 $VERBOSE && echo ARCHIVEPATH=$ARCHIVEPATH
 
@@ -382,7 +391,7 @@ then
 fi
 
 #
-# Common reporting funtion
+# Common reporting function
 #
 _report()
 {
@@ -394,13 +403,35 @@ _report()
     pmdumplog -z -l $ARCHIVEPATH | awk '/commencing/ {print "# ",$2,$3,$4,$5,$6}' >>$REPORTFILE
     echo $_comment >>$REPORTFILE
     $VERBOSE && echo pmrep $REPORT_OPTIONS $_conf
-    pmrep $REPORT_OPTIONS $_conf >$tmp/out
-    if [ -s $tmp/out ]; then
+    pmrep $REPORT_OPTIONS $_conf >$tmp/out 2>$tmp/err
+    if [ -s $tmp/out ]
+    then
     	cat $tmp/out >>$REPORTFILE
     else
-    	echo "-- no report for config \"$_conf\"" >>$REPORTFILE
+	if grep 'PM_ERR_NAME' $tmp/err >/dev/null 2>&1
+	then
+	    metric=`$PCP_AWK_PROG <$tmp/err '{ print $3 }'`
+	    echo "-- no report for config \"$_conf\" because the metric \"$metric\" is not in the archive" >>$REPORTFILE
+	elif grep 'PM_ERR_INDOM_LOG' $tmp/err >/dev/null 2>&1
+	then
+	    metric=`$PCP_AWK_PROG <$tmp/err '{ print $3 }'`
+	    echo "-- no report for config \"$_conf\" because there are no values for any instance of the metric \"$metric\" in the archive" >>$REPORTFILE
+	elif grep 'PM_ERR_BADDERIVE' $tmp/err >/dev/null 2>&1
+	then
+	    metric=`$PCP_AWK_PROG <$tmp/err '{ print $3 }'`
+	    echo "-- no report for config \"$_conf\" because one or more metrics for the derived metric \"$metric\" is not in the archive" >>$REPORTFILE
+	else
+	    cat $tmp/err >>$REPORTFILE
+	    echo "-- no report for config \"$_conf\"" >>$REPORTFILE
+	fi
     fi
 }
+
+echo "System Activity Report" >>$REPORTFILE
+echo >>$REPORTFILE
+echo "Host:            $HOSTNAME" >>$REPORTFILE
+echo "Archive:         $ORIG_ARCHIVEPATH" >>$REPORTFILE
+echo "Report created:  `date`" >>$REPORTFILE
 
 _report :sar-u-ALL '# CPU Utilization statistics, all CPUS'
 _report :sar-u-ALL-P-ALL '# CPU Utilization statistics, per-CPU'
@@ -428,8 +459,6 @@ _report :sar-y '# TTY devices activity'
 _report :numa-hint-faults '# NUMA hint fault statistics'
 _report :numa-per-node-cpu '# NUMA per-node CPU statistics'
 _report :numa-pgmigrate-per-node '# NUMA per-node page migration statistics'
-
-[ -f $tmp/err ] && status=1
 
 # optional end logging to $PCP_LOG_DIR/NOTICES
 #

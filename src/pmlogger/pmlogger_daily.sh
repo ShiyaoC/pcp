@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 #
 # Copyright (c) 2013-2016,2018,2020 Red Hat.
 # Copyright (c) 1995-2000,2003 Silicon Graphics, Inc.  All Rights Reserved.
@@ -335,7 +335,7 @@ Options:
   -V,--verbose            verbose output (multiple times for very verbose)
   -x=TIME,--compress-after=TIME  compress archive data files after TIME (format DD[:HH[:MM]])
   -X=PROGRAM,--compressor=PROGRAM  use PROGRAM for archive data file compression
-  -Y=REGEX,--regex=REGEX  egrep filter when compressing files ["$COMPRESSREGEX_DEFAULT"]
+  -Y=REGEX,--regex=REGEX  grep -E filter when compressing files ["$COMPRESSREGEX_DEFAULT"]
   -Z                      QA mode, force pmlogger re-exec
   -z                      QA mode, do not re-exec pmlogger
   --help
@@ -562,29 +562,15 @@ else
     touch $tmp/merge_callback
     if $DO_DAILY_REPORT && [ -x "$PCP_BINADM_DIR/pmlogger_daily_report" ]
     then
-	# pmlogger_daily_report script is present, need to see if it
-	# is enabled ... in systemd-land that's easy, otherwise we
-	# defer to the existence of the $PCP_SA_DIR directory
+	# pmlogger_daily_report script is present, need to see if the
+	# "zeroconf" pmlogconf(1) files are installed (the report needs
+	# metrics enabled by these files to be logged by the primary
+	# pmlogger) ... pick the "disk" one as a representative
 	#
-	rm -f $tmp/want_daily_report
-	if which systemctl >/dev/null 2>&1
+	if [ -f $PCP_VAR_DIR/config/pmlogconf/zeroconf/disk ]
 	then
-	    # if pmlogger_daily_report.timer is enabled, assume we're good
-	    # to go ...
-	    #
-	    if [ "`systemctl is-enabled pmlogger_daily_report.timer 2>/dev/null`" = enabled ]
-	    then
-		touch $tmp/want_daily_report
-	    fi
-	else
-	    if [ -d "$PCP_SA_DIR" ]
-	    then
-		touch $tmp/want_daily_report
-	    fi
-	fi
-	if [ -f $tmp/want_daily_report ]
-	then
-	    # Note: actual achive name will follow -a when callback
+
+	    # Note: actual archive name will follow -a when callback
 	    # happens
 	    #
 	    if _add_callback "$PCP_BINADM_DIR/pmlogger_daily_report -o $PCP_SA_DIR -a" $tmp/merge_callback
@@ -1365,7 +1351,7 @@ s/^\([A-Za-z][A-Za-z0-9_]*\)=/export \1; \1=/p
 		then
 		    echo >&2 "primary pmlogger process PID not found"
 		    ls >&2 -l "$PCP_TMP_DIR/pmlogger"
-		    $PCP_PS_PROG $PCP_PS_ALL_FLAGS | egrep >&2 '[P]ID|[p]mlogger'
+		    $PCP_PS_PROG $PCP_PS_ALL_FLAGS | grep -E >&2 '[P]ID|[p]mlogger'
 		fi
 	    elif _get_pids_by_name pmlogger | grep "^$pid\$" >/dev/null
 	    then
@@ -1832,7 +1818,7 @@ p
 			find . -type f -mtime +$mtime
 		    fi \
 		    | _filter_filename \
-		    | egrep -v "$COMPRESSREGEX" \
+		    | grep -E -v "$COMPRESSREGEX" \
 		    | sort >$tmp/list
 		    if [ -s $tmp/list -a -n "$current_base" -a -n "$current_vol" ]
 		    then
@@ -1850,7 +1836,7 @@ p
 			# ...DDMM.HH.MM-seq# variants to get the base name
 			# separated from the other part of the file name, but
 			# on the upside compressed file names were stripped out
-			# above by the egrep -v "$COMPRESSREGEX"
+			# above by the grep -E -v "$COMPRESSREGEX"
 			#
 			sed -n <$tmp/list \
 			    -e '/\./s/\.\([^.][^.]*\)$/ \1/p' \

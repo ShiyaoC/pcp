@@ -1,0 +1,15 @@
+[Unit]
+Description=Generate system activity reports
+Documentation=man:pmlogger_daily_report(1)
+ConditionPathExists=!/usr/local/etc/cron.d/pcp-pmlogger-daily-report
+
+[Service]
+Type=exec
+Restart=no
+TimeoutSec=120
+Environment="PMLOGGER_DAILY_REPORT_PARAMS=-o /usr/local/var/log/pcp/sa"
+EnvironmentFile=-/usr/local/etc/sysconfig/pmlogger_timers
+ExecStart=/usr/local/libexec/pcp/bin/pmlogger_daily_report $PMLOGGER_DAILY_REPORT_PARAMS
+WorkingDirectory=/usr/local/var/lib/pcp
+Group=pcp
+User=pcp

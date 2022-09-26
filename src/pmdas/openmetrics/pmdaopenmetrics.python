@@ -830,7 +830,7 @@ class Source(object):
                 # each list entry is (uppercase are literal) :
                 #     {INCLUDE|EXCLUDE} METRIC regex
                 #     {INCLUDE|EXCLUDE|OPTIONAL} LABEL regex
-                # These are extended egrep style regexs, disjuncted by '|'
+                # These are extended grep -E style regexs, disjuncted by '|'
                 # Full string matches must be anchored, e.g. ^matchme$|*endswith$
                 header_filter = ''.join(line.split(':', 2)[1]).lstrip()
                 self.filterlist.append(header_filter)
@@ -1470,10 +1470,12 @@ class OpenMetricsPMDA(PMDA):
         if self.dbg:
             super(OpenMetricsPMDA, self).log("debug: " + s)
 
-    def log(self, message):
+    @staticmethod
+    def log(message):
         PMDA.log(message)
 
-    def err(self, message):
+    @staticmethod
+    def err(message):
         PMDA.err(message)
 
 

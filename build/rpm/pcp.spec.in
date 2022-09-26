@@ -77,11 +77,7 @@ BuildRequires: avahi-devel
 BuildRequires: xz-devel
 %endif
 %if "@enable_secure@" == "true"
-%if "%{_vendor}" == "suse"
-BuildRequires: mozilla-nss-devel
-%else
-BuildRequires: nss-devel
-%endif
+BuildRequires: openssl-devel >= 1.1.1
 %if "%{_vendor}" == "mandriva"
 BuildRequires: %{_lib}sasl-devel
 %else
@@ -114,6 +110,9 @@ BuildRequires: initscripts
 %endif
 %if "@enable_systemd@" == "true"
 BuildRequires: systemd-devel
+%if 0%{?fedora} >= 32 || 0%{?rhel} >= 9
+BuildRequires: systemd-rpm-macros
+%endif
 %endif
 %if "@pmda_statsd@" == "true"
 # ragel unavailable on RHEL8
@@ -208,6 +207,15 @@ then
     (cd "%1" && ./Rebuild -s && rm -f "%2")
 else
     echo "WARNING: Cannot write to %1, skipping namespace rebuild." >&2
+fi
+}
+
+%global run_pmieconf() %{expand:
+if [ -w "%1" ]
+then
+    pmieconf -c enable "%2"
+else
+    echo "WARNING: Cannot write to %1, skipping pmieconf enable of %2." >&2
 fi
 }
 
@@ -323,20 +331,17 @@ Obsoletes: pcp-gui-testsuite < 3.9.5
 Requires: pcp-pmda-bonding pcp-pmda-dbping pcp-pmda-ds389 pcp-pmda-ds389log
 Requires: pcp-pmda-gpfs pcp-pmda-gpsd pcp-pmda-lustre pcp-pmda-pdns
 Requires: pcp-pmda-memcache pcp-pmda-named pcp-pmda-netfilter pcp-pmda-news
-Requires: pcp-pmda-samba pcp-pmda-slurm pcp-pmda-zimbra
+Requires: pcp-pmda-redis pcp-pmda-samba pcp-pmda-slurm pcp-pmda-zimbra
 %endif
 Requires: pcp-pmda-apache pcp-pmda-bash pcp-pmda-cisco pcp-pmda-dm pcp-pmda-gfs2
 Requires: pcp-pmda-logger pcp-pmda-mailq pcp-pmda-mounts
 Requires: pcp-pmda-nvidia-gpu pcp-pmda-roomtemp pcp-pmda-sendmail pcp-pmda-shping
-Requires: pcp-pmda-lustrecomm pcp-pmda-redis pcp-pmda-docker pcp-pmda-smart
-Requires: pcp-pmda-hacluster pcp-pmda-sockets
+Requires: pcp-pmda-lustrecomm pcp-pmda-docker pcp-pmda-smart
+Requires: pcp-pmda-hacluster pcp-pmda-sockets pcp-pmda-podman
 %if "@have_python@" == "true"
 Requires: pcp-pmda-gluster pcp-pmda-zswap pcp-pmda-unbound pcp-pmda-mic
 Requires: pcp-pmda-haproxy pcp-pmda-nfsclient pcp-pmda-lmsensors
 Requires: pcp-pmda-netcheck pcp-pmda-rabbitmq pcp-pmda-openvswitch
-%endif
-%if "@pmda_podman@" == "true"
-Requires: pcp-pmda-podman
 %endif
 %if "@pmda_statsd@" == "true"
 Requires: pcp-pmda-statsd
@@ -954,7 +959,6 @@ but can also be configured to monitor remote GUIDs such as IB switches.
 #end pcp-pmda-infiniband
 %endif
 
-%if "@pmda_podman@" == "true"
 #
 # pcp-pmda-podman
 #
@@ -968,7 +972,6 @@ Requires: pcp = @package_version@ pcp-libs = @package_version@
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
 collecting podman container and pod statistics via the podman REST API.
 #end pcp-pmda-podman
-%endif
 
 %if "@pmda_statsd@" == "true"
 #
@@ -2282,7 +2285,7 @@ basic_manifest() {
 # to isolate the (somewhat exotic) dependencies for these tools.
 # Likewise, for the pcp-pmda and pcp-testsuite subpackages.
 #
-total_manifest | keep 'testsuite|etc/systemd/system|libpcp_fault|pcp/fault.h' >pcp-testsuite-files
+total_manifest | keep 'testsuite|pcpqa|etc/systemd/system|libpcp_fault|pcp/fault.h' >pcp-testsuite-files
 total_manifest | keep 'tutorials|/html/|pcp-doc|man.*\.[1-9].*' | cull 'out' >pcp-doc-files
 basic_manifest | keep "$PCP_GUI|pcp-gui|applications|pixmaps|hicolor" | cull 'pmtime.h' >pcp-gui-files
 basic_manifest | keep 'selinux' | cull 'tmp|GNUselinuxdefs' >pcp-selinux-files
@@ -2521,10 +2524,14 @@ done
 %endif
 
 %pre testsuite
-test -d @pcp_var_dir@/testsuite || mkdir -p -m 755 @pcp_var_dir@/testsuite
+%if 0%{?fedora} >= 32 || 0%{?rhel} >= 9
+%sysusers_create_compat %{_builddir}/debian/pcp-testsuite.sysusers
+%else
 getent group pcpqa >/dev/null || groupadd -r pcpqa
 getent passwd pcpqa >/dev/null || \
   useradd -c "PCP Quality Assurance" -g pcpqa -d @pcp_var_dir@/testsuite -M -r -s /bin/bash pcpqa 2>/dev/null
+%endif
+test -d @pcp_var_dir@/testsuite || mkdir -p -m 755 @pcp_var_dir@/testsuite
 chown -R pcpqa:pcpqa @pcp_var_dir@/testsuite 2>/dev/null
 exit 0
 
@@ -2541,16 +2548,23 @@ chown -R pcpqa:pcpqa @pcp_var_dir@/testsuite 2>/dev/null
     /sbin/service pmcd condrestart
     /sbin/service pmlogger condrestart
 %endif
+exit 0
 
 %pre
+%if 0%{?fedora} >= 32 || 0%{?rhel} >= 9
+%sysusers_create_compat %{_builddir}/debian/pcp.sysusers
+%else
 getent group pcp >/dev/null || groupadd -r pcp
 getent passwd pcp >/dev/null || \
     useradd -c "Performance Co-Pilot" -g pcp -d @pcp_var_dir@ -M -r -s /sbin/nologin pcp
+%endif
+exit 0
 
 %post zeroconf
 PCP_PMDAS_DIR=@pcp_pmdas_dir@
 PCP_SYSCONFIG_DIR=@pcp_sysconfig_dir@
 PCP_PMCDCONF_PATH=@pcp_pmcdconf_path@
+PCP_PMIECONFIG_DIR=@pcp_var_dir@/config/pmie
 # auto-install important PMDAs for RH Support (if not present already)
 needinstall='dm'
 %if "@have_python@" == "true"
@@ -2566,8 +2580,7 @@ for PMDA in $needinstall ; do
     fi
 done
 # auto-enable these usually optional pmie rules
-pmieconf -c enable dmthin
-
+%{run_pmieconf "$PCP_PMIECONFIG_DIR" dmthin}
 %if "@enable_systemd@" == "true"
     systemctl restart pmcd pmlogger pmie >/dev/null 2>&1
     systemctl enable pmcd pmlogger pmie >/dev/null 2>&1
@@ -2606,10 +2619,8 @@ pmieconf -c enable dmthin
 %{pmda_remove "$1" "perfevent"}
 %endif
 
-%if "@pmda_podman@" == "true"
 %preun pmda-podman
 %{pmda_remove "$1" "podman"}
-%endif
 
 %if "@pmda_statsd@" == "true"
 %preun pmda-statsd
@@ -2961,9 +2972,7 @@ PCP_SA_DIR=@pcp_sa_dir@
 %files pmda-infiniband -f pcp-pmda-infiniband-files.rpm
 %endif
 
-%if "@pmda_podman@" == "true"
 %files pmda-podman -f pcp-pmda-podman-files.rpm
-%endif
 
 %if "@pmda_statsd@" == "true"
 %files pmda-statsd -f pcp-pmda-statsd-files.rpm
