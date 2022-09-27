@@ -3785,8 +3785,8 @@ series_get_time_domain_histogram(node_t *np)
 		    np->value_set.series_values[i].series_sample[j].bin_info[bin].start = sdsnew(start_value);
 		    np->value_set.series_values[i].series_sample[j].bin_info[bin].end = sdsnew(end_value);
 		    np->value_set.series_values[i].series_sample[j].bin_info[bin].amount = sdsnew(amount_value);
-		    np->value_set.series_values[i].series_sample[j].bin_info[bin].total_inst = n_instances;
-		    np->value_set.series_values[i].series_sample[j].bin_info[bin].ratio = sdsnew(ratio);
+		    np->value_set.series_values[i].series_sample[j].bin_info[bin].max_value = max;
+		//     np->value_set.series_values[i].series_sample[j].bin_info[bin].ratio = sdsnew(ratio);
 		}
 		// pmsprintf(max_freq, sizeof(max_freq), "%d", max);
 		// np->value_set.series_values[i].series_sample[j].max_freq = sdsnew(max_freq);

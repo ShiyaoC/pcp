@@ -425,17 +425,19 @@ on_histogram_value(pmSID sid, pmSeriesHistogramValue *value, void *arg){
     series_data		*dp = (series_data *)arg;
 //     series_inst		*ip;
     sds			series, start, end, amount;
-    int			need_free = 1, bar_size = 20;
+    int			need_free = 1, max_hist = 20, max_value, len, i;
+    double		data;
+    char		hist[max_hist + 1];
 
     if (series_next(dp, sid)){
 	printf("\n%s\n", sid);
-	printf("    Range %*s Frequency  ", 22, "");
-	printf("%20d \n", value->total_inst);
+	printf("    Range %*s Frequency  \n", 22, "");
     }
 
     start = value->start;
     end = value->end;
     amount = value->amount;
+    max_value = value -> max_value; 
 
     if (dp->type == NULL)
 	dp->type = sdsempty();
@@ -452,7 +454,20 @@ on_histogram_value(pmSID sid, pmSeriesHistogramValue *value, void *arg){
     else
 	need_free = 0;
 
-    printf("    [%s, %s)	%s |\n", start, end, amount);
+    printf("    [%s, %s)	%s |", start, end, amount);
+    data = strtod(amount, NULL);
+    len = data * max_hist / max_value;
+    if (data != 0 && len <= 0){
+	len = 1;
+    }
+
+    for (i = 0; i < len; i++){
+	hist[i] = '*';
+    }
+    hist[max_hist+1] = '\0';
+    printf( "%-*s\n", max_hist + 1, hist);
+
+//     printf("%*s", count, "");
 //     printf("%-20s\n", "%*s");
 //     series = value->series;
 //     if (sdscmp(series, sid) == 0)

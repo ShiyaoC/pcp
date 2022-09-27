@@ -104,8 +104,8 @@ typedef struct pmSeriesHistogramValue {
     sds		start;
     sds		end;
     sds		amount;
-    sds		ratio;
-    int		total_inst;
+    // sds		ratio;
+    int		max_value;
 } pmSeriesHistogramValue;
 
 typedef struct pmSeriesLabel {
